@@ -4,6 +4,7 @@
 #include "sim/search/BattleScumSearcher2.h"
 #include <cstdint>
 #include <array>
+#include <limits>
 #include <map>
 #include <unordered_set>
 #include <unordered_map>
@@ -23,6 +24,7 @@ struct PublicBeliefCombatSearch {
         double prior = 0.0;
         int inFlight = 0;
         std::int64_t measured = 0;
+        double best = -std::numeric_limits<double>::infinity();  // max backed-up value
         // Actual terminal win, surviving HP, potions, max HP, gold; not guesses.
         std::array<double, 5> outcomeSum{};
     };
@@ -46,6 +48,9 @@ struct PublicBeliefCombatSearch {
     std::int64_t retainedVisits = 0;
     std::size_t retainedNodes = 0;
     double priorStrength = 0.0;
+    // Max backup (single-particle / deterministic search): selection and selectedAction use each
+    // edge's best backed-up value instead of its mean. Off = the historical mean backup.
+    bool maxBackup = false;
     // Zero is the unmodified historical control. One has explicit terminal
     // resources and excludes escapes; scoring changes are independent of NN use.
     int objectiveMode = 0;

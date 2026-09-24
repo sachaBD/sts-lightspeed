@@ -186,7 +186,8 @@ std::size_t PublicBeliefCombatSearch::select(const Node &current) {
         const auto &edge = current.edges[i];
         const auto visits = edge.visits + edge.inFlight;
         if (visits == 0) return i;
-        auto score = edge.valueSum / visits
+        const double value = maxBackup && edge.visits ? edge.best : edge.valueSum / visits;
+        auto score = value
             + exploration * std::sqrt(std::log(current.visits + current.inFlight + 1.0) / visits);
         if (&current == &root() && priorStrength > 0)
             score += priorStrength * edge.prior * std::sqrt(current.visits + current.inFlight + 1.0) / (1 + visits);
@@ -262,7 +263,7 @@ void PublicBeliefCombatSearch::backup(Path &path, double value, const BattleCont
         ++entry.first->visits;
         auto &edge = entry.first->edges[entry.second];
         --edge.inFlight;
-        ++edge.visits; edge.valueSum += value; edge.wins += won;
+        ++edge.visits; edge.valueSum += value; edge.wins += won; edge.best = std::max(edge.best, value);
         if (resolved) {
             ++edge.measured;
             if (won) {
@@ -307,7 +308,8 @@ const PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::root() const {
 Action PublicBeliefCombatSearch::selectedAction() const {
     if (!pending.empty()) throw std::logic_error("cannot select an action with pending leaves");
     const auto &edges = root().edges;
-    auto best = std::max_element(edges.begin(), edges.end(), [](const Edge &a, const Edge &b) {
+    auto best = std::max_element(edges.begin(), edges.end(), [this](const Edge &a, const Edge &b) {
+        if (maxBackup && a.visits && b.visits && a.best != b.best) return a.best < b.best;
         if (a.visits != b.visits) return a.visits < b.visits;
         return a.valueSum < b.valueSum;
     });
