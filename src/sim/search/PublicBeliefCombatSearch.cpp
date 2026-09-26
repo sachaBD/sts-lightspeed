@@ -379,9 +379,19 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         throw std::runtime_error("unsupported effect in unified public combat search");
     if (request && current.outcome == Outcome::UNDECIDED) {
         PROF_START(T4);
-        auto &slot = pending.emplace_hint(pending.end(), std::piecewise_construct,
-                                          std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
-        slot.state = std::move(current); slot.path = std::move(path);
+        // Reuse a submitted request's map node: no allocation, and copy-assignment keeps the state's
+        // pile capacity.
+        if (spareRequests.empty()) {
+            auto &slot = pending.emplace_hint(pending.end(), std::piecewise_construct,
+                                              std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
+            slot.state = current; slot.path = std::move(path);
+        } else {
+            auto handle = std::move(spareRequests.back());
+            spareRequests.pop_back();
+            handle.key() = ++nextRequest;
+            handle.mapped().state = current; handle.mapped().path = std::move(path);
+            pending.insert(pending.end(), std::move(handle));
+        }
         PROF_ADD(5, T4);
         return;
     }
@@ -513,7 +523,7 @@ void PublicBeliefCombatSearch::submit(std::uint64_t id, double value) {
     if (found == pending.end() || !std::isfinite(value) || value < -.1 || value > 2)
         throw std::invalid_argument("invalid unified leaf submission");
     backup(found->second.path, value, nullptr);
-    pending.erase(found);
+    spareRequests.push_back(pending.extract(found));
 }
 
 void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
@@ -524,7 +534,7 @@ void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
     if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in guided leaf");
     backup(found->second.path, terminalValue(state), &state);
-    pending.erase(found);
+    spareRequests.push_back(pending.extract(found));
 }
 
 void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::uint64_t action, std::uint64_t seed) {

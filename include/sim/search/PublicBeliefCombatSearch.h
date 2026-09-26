@@ -60,6 +60,7 @@ struct PublicBeliefCombatSearch {
     int objectiveMode = 0;
     double victoryHp = 35.0, potionHp = 4.0, maxHpPrice = 0.0, goldHpPrice = 0.0;
     std::map<std::uint64_t, Request> pending;
+    std::vector<std::map<std::uint64_t, Request>::node_type> spareRequests;  // submitted, for reuse
 
     PublicBeliefCombatSearch(std::vector<BattleContext> states,
                             std::uint64_t seed, int rolloutMode, bool mergeIdenticalCards = false);
