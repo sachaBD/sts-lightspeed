@@ -45,9 +45,23 @@ std::uint64_t mix64(std::uint64_t x) {
     x ^= x >> 27; x *= 0x94d049bb133111ebULL;
     return x ^ (x >> 31);
 }
+// Position-tagged sum of mixed words: the adds are independent (no serial dependency chain), so they
+// overlap in the pipeline. Two different word sequences give the same sum only by 64-bit coincidence.
+std::uint64_t positionTag(std::size_t i) { return mix64((i + 1) * 0x9E3779B97F4A7C15ULL); }
+struct PositionTags {
+    std::array<std::uint64_t, 1024> tags{};
+    PositionTags() { for (std::size_t i = 0; i < tags.size(); ++i) tags[i] = positionTag(i); }
+};
+const PositionTags POSITION_TAGS;
 struct FastHash {
-    std::uint64_t h = ROOT_KEY;
-    void add(std::uint64_t value) { h = mix64(h ^ value); }
+    std::uint64_t sum = 0;
+    std::size_t position = 0;
+    void add(std::uint64_t value) {
+        const auto tag = position < POSITION_TAGS.tags.size() ? POSITION_TAGS.tags[position] : positionTag(position);
+        ++position;
+        sum += mix64(value ^ tag);
+    }
+    std::uint64_t value() const { return mix64(sum ^ position); }
 };
 // Injective packing of cardKey's fields (id, upgrade count, specialData, cost, costForTurn,
 // freeToPlayOnce, retain) into one word.
@@ -264,7 +278,7 @@ std::uint64_t PublicBeliefCombatSearch::observationKey(const BattleContext &s) {
             for (const auto id : selection.cards) hash.add(static_cast<int>(id));
         }
     }
-    return hash.h;
+    return hash.value();
 }
 
 PublicBeliefCombatSearch::PublicBeliefCombatSearch(
