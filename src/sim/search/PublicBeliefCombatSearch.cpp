@@ -4,7 +4,16 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef PBCS_PROFILE
+#include <x86intrin.h>
+#define PROF_START(t) auto t = __rdtsc()
+#define PROF_ADD(i, t) g_prof[i] += __rdtsc() - t
+#else
+#define PROF_START(t)
+#define PROF_ADD(i, t)
+#endif
 namespace sts::search {
+unsigned long long g_prof[8];  // PBCS_PROFILE: cycles in simulate's phases
 namespace {
 constexpr std::uint64_t ROOT_KEY = 0xcbf29ce484222325ULL;
 void append(std::uint64_t &hash, std::uint64_t value) {
@@ -277,28 +286,38 @@ PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
 std::size_t PublicBeliefCombatSearch::select(const Node &current) {
     double best = -std::numeric_limits<double>::infinity();
     std::size_t selected = 0;
+    // Loop invariants hoisted (same arithmetic, so the same choices).
+    const double logParent = std::log(current.visits + current.inFlight + 1.0);
+    const bool usePrior = priorStrength > 0 && &current == &root();
+    const double sqrtParent = usePrior ? std::sqrt(current.visits + current.inFlight + 1.0) : 0.0;
     for (std::size_t i = 0; i < current.edges.size(); ++i) {
         const auto &edge = current.edges[i];
         const auto visits = edge.visits + edge.inFlight;
         if (visits == 0) return i;
         const double value = maxBackup && edge.visits ? edge.best : edge.valueSum / visits;
         auto score = value
-            + exploration * std::sqrt(std::log(current.visits + current.inFlight + 1.0) / visits);
-        if (&current == &root() && priorStrength > 0)
-            score += priorStrength * edge.prior * std::sqrt(current.visits + current.inFlight + 1.0) / (1 + visits);
+            + exploration * std::sqrt(logParent / visits);
+        if (usePrior)
+            score += priorStrength * edge.prior * sqrtParent / (1 + visits);
         if (score > best) { best = score; selected = i; }
     }
     return selected;
 }
 
 void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutTurns, int rolloutSteps) {
+    PROF_START(T0);
     BattleContext current(particles[particle]);
+    PROF_ADD(0, T0);
     std::uint64_t key = rootKey;
     Path path;
     for (int depth = 0; depth < maximumActions; ++depth) {
         if (current.outcome != Outcome::UNDECIDED) break;
+        PROF_START(T1);
         auto &at = node(key, current);
+        PROF_ADD(1, T1);
+        PROF_START(T1b);
         auto choice = select(at);
+        PROF_ADD(2, T1b);
         auto action = at.edges[choice].action;
         if (drawSelection(current)) {
             bool matched = false;
@@ -323,18 +342,26 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         const bool unvisited = at.edges[choice].visits + at.edges[choice].inFlight == 0;
         ++at.inFlight; ++at.edges[choice].inFlight;
         path.emplace_back(&at, choice);
+        PROF_START(T2);
         action.execute(current);
+        PROF_ADD(3, T2);
         if (unvisited) {
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
             break;
         }
+        PROF_START(T3);
         append(key, at.edges[choice].semanticKey); append(key, observationKey(current));
+        PROF_ADD(4, T3);
         at.children.insert(key);
     }
     if (current.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in unified public combat search");
     if (request && current.outcome == Outcome::UNDECIDED) {
-        pending.emplace(++nextRequest, Request{std::move(current), std::move(path)});
+        PROF_START(T4);
+        auto &slot = pending.emplace_hint(pending.end(), std::piecewise_construct,
+                                          std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
+        slot.state = std::move(current); slot.path = std::move(path);
+        PROF_ADD(5, T4);
         return;
     }
     backup(path, terminalValue(current), &current);
