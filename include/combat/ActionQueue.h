@@ -62,6 +62,8 @@ namespace sts {
 
     template<int capacity>
     void ActionQueue<capacity>::clear() {
+        // Drop the stored functions too: stale slots would otherwise be copied with every BattleContext.
+        for (auto &f : arr) f = nullptr;
         size = 0;
         back = 0;
         front = 0;
@@ -107,7 +109,9 @@ namespace sts {
 #ifdef sts_asserts
         assert(size > 0 );
 #endif
-        ActionFunction a = arr[front];
+        // Move out and empty the slot (a stale slot would be copied with every BattleContext copy).
+        ActionFunction a = std::move(arr[front]);
+        arr[front] = nullptr;
         ++front;
         --size;
         if (front >= capacity) {
