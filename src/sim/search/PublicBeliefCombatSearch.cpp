@@ -4,7 +4,16 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef PBCS_PROFILE
+#include <x86intrin.h>
+#define PROF_START(t) auto t = __rdtsc()
+#define PROF_ADD(i, t) g_prof[i] += __rdtsc() - t
+#else
+#define PROF_START(t)
+#define PROF_ADD(i, t)
+#endif
 namespace sts::search {
+unsigned long long g_prof[8];  // PBCS_PROFILE: cycles in simulate's phases
 namespace {
 constexpr std::uint64_t ROOT_KEY = 0xcbf29ce484222325ULL;
 void append(std::uint64_t &hash, std::uint64_t value) {
@@ -29,6 +38,52 @@ template<class Pile> void pile(std::uint64_t &hash, const Pile &cards, bool unor
     append(hash, keys.size());
     for (auto key : keys) append(hash, key);
 }
+// Fast observation key (node keys only): the same fields and the same equality as publicObservation,
+// with one 64-bit mix per value instead of byte-wise FNV.
+std::uint64_t mix64(std::uint64_t x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+// Position-tagged sum of mixed words: the adds are independent (no serial dependency chain), so they
+// overlap in the pipeline. Two different word sequences give the same sum only by 64-bit coincidence.
+std::uint64_t positionTag(std::size_t i) { return mix64((i + 1) * 0x9E3779B97F4A7C15ULL); }
+struct PositionTags {
+    std::array<std::uint64_t, 1024> tags{};
+    PositionTags() { for (std::size_t i = 0; i < tags.size(); ++i) tags[i] = positionTag(i); }
+};
+const PositionTags POSITION_TAGS;
+struct FastHash {
+    std::uint64_t sum = 0;
+    std::size_t position = 0;
+    void add(std::uint64_t value) {
+        const auto tag = position < POSITION_TAGS.tags.size() ? POSITION_TAGS.tags[position] : positionTag(position);
+        ++position;
+        sum += mix64(value ^ tag);
+    }
+    std::uint64_t value() const { return mix64(sum ^ position); }
+};
+// Injective packing of cardKey's fields (id, upgrade count, specialData, cost, costForTurn,
+// freeToPlayOnce, retain) into one word.
+std::uint64_t cardWord(const CardInstance &card) {
+    return static_cast<std::uint64_t>(static_cast<std::uint16_t>(card.id))
+        | static_cast<std::uint64_t>(static_cast<std::uint16_t>(card.specialData)) << 16
+        | static_cast<std::uint64_t>(static_cast<std::uint8_t>(card.cost)) << 32
+        | static_cast<std::uint64_t>(static_cast<std::uint8_t>(card.costForTurn)) << 40
+        | static_cast<std::uint64_t>(card.getUpgradeCount() & 0x3fff) << 48
+        | static_cast<std::uint64_t>(card.freeToPlayOnce) << 62
+        | static_cast<std::uint64_t>(card.retain) << 63;
+}
+template<class Pile> void fastPile(FastHash &hash, const Pile &cards, bool unordered) {
+    hash.add(cards.size());
+    if (unordered) {  // multiset: order-free sum of mixed card words
+        std::uint64_t sum = 0;
+        for (const auto &card : cards) sum += mix64(cardWord(card) ^ 0x5851f42d4c957f2dULL);
+        hash.add(sum);
+    } else {
+        for (const auto &card : cards) hash.add(cardWord(card));
+    }
+}
 bool drawSelection(const BattleContext &state) {
     if (state.inputState != InputState::CARD_SELECT) return false;
     switch (state.cardSelectInfo.cardSelectTask) {
@@ -47,6 +102,26 @@ std::uint64_t PublicBeliefCombatSearch::publicActionKey(const BattleContext &sta
         return hash;
     }
     return action.bits;
+}
+
+std::uint64_t PublicBeliefCombatSearch::actionKey(const BattleContext &state, Action action) const {
+    return mergeIdenticalCards ? identityActionKey(state, action) : publicActionKey(state, action);
+}
+
+std::uint64_t PublicBeliefCombatSearch::identityActionKey(const BattleContext &state, Action action) {
+    if (state.inputState == InputState::PLAYER_NORMAL) {
+        const auto type = action.getActionType();
+        if (type == ActionType::CARD || type == ActionType::POTION) {
+            auto hash = ROOT_KEY;
+            append(hash, 0x6d65726765ULL);  // domain tag: never equal to raw action bits
+            append(hash, static_cast<int>(type));
+            if (type == ActionType::CARD) append(hash, cardKey(state.cards.hand[action.getSourceIdx()]));
+            else append(hash, static_cast<int>(state.potions[action.getSourceIdx()]));
+            append(hash, action.getTargetIdx());
+            return hash;
+        }
+    }
+    return publicActionKey(state, action);
 }
 
 Action PublicBeliefCombatSearch::mapAction(const BattleContext &source, Action action,
@@ -143,10 +218,74 @@ std::uint64_t PublicBeliefCombatSearch::publicObservation(const BattleContext &s
     return hash;
 }
 
+std::uint64_t PublicBeliefCombatSearch::observationKey(const BattleContext &s) {
+    // Mirrors publicObservation field for field (keep them in sync).
+    FastHash hash;
+    hash.add(s.turn); hash.add(static_cast<int>(s.inputState));
+    hash.add(static_cast<int>(s.outcome));
+    const auto &p = s.player;
+    hash.add(p.curHp); hash.add(p.maxHp); hash.add(p.energy);
+    hash.add(p.energyPerTurn); hash.add(p.block); hash.add(p.strength);
+    hash.add(p.dexterity); hash.add(p.focus); hash.add(p.artifact);
+    hash.add(p.statusBits0); hash.add(p.statusBits1);
+    hash.add(p.statusMap.size());
+    for (const auto &entry : p.statusMap) {
+        hash.add(static_cast<int>(entry.first)); hash.add(entry.second);
+    }
+    hash.add(p.cardsPlayedThisTurn); hash.add(p.attacksPlayedThisTurn);
+    hash.add(p.skillsPlayedThisTurn); hash.add(p.cardsDiscardedThisTurn);
+    hash.add(p.happyFlowerCounter); hash.add(p.incenseBurnerCounter);
+    hash.add(p.inkBottleCounter); hash.add(p.nunchakuCounter);
+    hash.add(p.penNibCounter); hash.add(p.sundialCounter);
+    hash.add(p.relicBits0); hash.add(p.relicBits1);
+    hash.add(s.potionCapacity);
+    for (int i = 0; i < s.potionCapacity; ++i) hash.add(static_cast<int>(s.potions[i]));
+    hash.add(s.cards.cardsInHand);
+    for (int i = 0; i < s.cards.cardsInHand; ++i) hash.add(cardWord(s.cards.hand[i]));
+    fastPile(hash, s.cards.drawPile, !p.hasRelic<RelicId::FROZEN_EYE>());
+    fastPile(hash, s.cards.discardPile, false); fastPile(hash, s.cards.exhaustPile, false);
+    hash.add(s.monsters.monsterCount);
+    for (int i = 0; i < s.monsters.monsterCount; ++i) {
+        const auto &m = s.monsters.arr[i];
+        hash.add(static_cast<int>(m.id)); hash.add(m.curHp);
+        hash.add(m.maxHp); hash.add(m.block);
+        hash.add(m.isTargetable()); hash.add(m.halfDead);
+        hash.add(m.statusBits); hash.add(m.artifact);
+        hash.add(m.strength); hash.add(m.weak); hash.add(m.vulnerable);
+        hash.add(m.metallicize); hash.add(m.platedArmor); hash.add(m.poison);
+        hash.add(m.regen); hash.add(m.shackled);
+        if (!p.hasRelic<RelicId::RUNIC_DOME>()) {
+            hash.add(static_cast<int>(m.moveHistory[0]));
+            if (m.isTargetable()) {
+                const auto intent = m.getMoveBaseDamage(s);
+                hash.add(intent.damage); hash.add(intent.attackCount);
+            }
+        }
+        hash.add(static_cast<int>(m.moveHistory[1]));
+    }
+    if (s.inputState == InputState::CARD_SELECT) {
+        const auto &selection = s.cardSelectInfo;
+        hash.add(static_cast<int>(selection.cardSelectTask));
+        hash.add(selection.pickCount); hash.add(selection.canPickZero);
+        hash.add(selection.canPickAnyNumber);
+        hash.add(selection.data0);
+        if (selection.cardSelectTask == CardSelectTask::SCRY) {
+            for (int i = 0; i < std::min(selection.pickCount, static_cast<int>(s.cards.drawPile.size())); ++i)
+                hash.add(cardWord(s.cards.drawPile[i]));
+        }
+        if (selection.cardSelectTask == CardSelectTask::DISCOVERY
+            || selection.cardSelectTask == CardSelectTask::CODEX) {
+            for (const auto id : selection.cards) hash.add(static_cast<int>(id));
+        }
+    }
+    return hash.value();
+}
+
 PublicBeliefCombatSearch::PublicBeliefCombatSearch(
-    std::vector<BattleContext> states, std::uint64_t seed, int rolloutMode)
+    std::vector<BattleContext> states, std::uint64_t seed, int rolloutMode, bool mergeIdentical)
     : particles(std::move(states)), random(seed), rollout(particles.at(0)),
       normalization(100.0 * (35 + particles.at(0).player.maxHp + 20)) {
+    mergeIdenticalCards = mergeIdentical;
     rollout.rolloutMode = rolloutMode;
     rollout.randGen.seed(seed);
     node(ROOT_KEY, particles.front());
@@ -163,7 +302,7 @@ PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
         if (!edge.action.isValidAction(state)) {
             throw std::runtime_error("native enumeration produced an illegal belief-search action");
         }
-        const auto semanticKey = publicActionKey(state, edge.action);
+        const auto semanticKey = actionKey(state, edge.action);
         if (std::none_of(created->edges.begin(), created->edges.end(),
                         [&](const auto &item) { return item.semanticKey == semanticKey; })) {
             created->edges.push_back({edge.action, semanticKey});
@@ -182,28 +321,38 @@ PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
 std::size_t PublicBeliefCombatSearch::select(const Node &current) {
     double best = -std::numeric_limits<double>::infinity();
     std::size_t selected = 0;
+    // Loop invariants hoisted (same arithmetic, so the same choices).
+    const double logParent = std::log(current.visits + current.inFlight + 1.0);
+    const bool usePrior = priorStrength > 0 && &current == &root();
+    const double sqrtParent = usePrior ? std::sqrt(current.visits + current.inFlight + 1.0) : 0.0;
     for (std::size_t i = 0; i < current.edges.size(); ++i) {
         const auto &edge = current.edges[i];
         const auto visits = edge.visits + edge.inFlight;
         if (visits == 0) return i;
         const double value = maxBackup && edge.visits ? edge.best : edge.valueSum / visits;
         auto score = value
-            + exploration * std::sqrt(std::log(current.visits + current.inFlight + 1.0) / visits);
-        if (&current == &root() && priorStrength > 0)
-            score += priorStrength * edge.prior * std::sqrt(current.visits + current.inFlight + 1.0) / (1 + visits);
+            + exploration * std::sqrt(logParent / visits);
+        if (usePrior)
+            score += priorStrength * edge.prior * sqrtParent / (1 + visits);
         if (score > best) { best = score; selected = i; }
     }
     return selected;
 }
 
 void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutTurns, int rolloutSteps) {
+    PROF_START(T0);
     BattleContext current(particles[particle]);
+    PROF_ADD(0, T0);
     std::uint64_t key = rootKey;
     Path path;
     for (int depth = 0; depth < maximumActions; ++depth) {
         if (current.outcome != Outcome::UNDECIDED) break;
+        PROF_START(T1);
         auto &at = node(key, current);
+        PROF_ADD(1, T1);
+        PROF_START(T1b);
         auto choice = select(at);
+        PROF_ADD(2, T1b);
         auto action = at.edges[choice].action;
         if (drawSelection(current)) {
             bool matched = false;
@@ -228,18 +377,36 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         const bool unvisited = at.edges[choice].visits + at.edges[choice].inFlight == 0;
         ++at.inFlight; ++at.edges[choice].inFlight;
         path.emplace_back(&at, choice);
+        PROF_START(T2);
         action.execute(current);
+        PROF_ADD(3, T2);
         if (unvisited) {
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
             break;
         }
-        append(key, at.edges[choice].semanticKey); append(key, publicObservation(current));
+        PROF_START(T3);
+        append(key, at.edges[choice].semanticKey); append(key, observationKey(current));
+        PROF_ADD(4, T3);
         at.children.insert(key);
     }
     if (current.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in unified public combat search");
     if (request && current.outcome == Outcome::UNDECIDED) {
-        pending.emplace(++nextRequest, Request{std::move(current), std::move(path)});
+        PROF_START(T4);
+        // Reuse a submitted request's map node: no allocation, and copy-assignment keeps the state's
+        // pile capacity.
+        if (spareRequests.empty()) {
+            auto &slot = pending.emplace_hint(pending.end(), std::piecewise_construct,
+                                              std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
+            slot.state = current; slot.path = std::move(path);
+        } else {
+            auto handle = std::move(spareRequests.back());
+            spareRequests.pop_back();
+            handle.key() = ++nextRequest;
+            handle.mapped().state = current; handle.mapped().path = std::move(path);
+            pending.insert(pending.end(), std::move(handle));
+        }
+        PROF_ADD(5, T4);
         return;
     }
     backup(path, terminalValue(current), &current);
@@ -370,7 +537,7 @@ void PublicBeliefCombatSearch::submit(std::uint64_t id, double value) {
     if (found == pending.end() || !std::isfinite(value) || value < -.1 || value > 2)
         throw std::invalid_argument("invalid unified leaf submission");
     backup(found->second.path, value, nullptr);
-    pending.erase(found);
+    spareRequests.push_back(pending.extract(found));
 }
 
 void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
@@ -381,14 +548,14 @@ void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
     if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in guided leaf");
     backup(found->second.path, terminalValue(state), &state);
-    pending.erase(found);
+    spareRequests.push_back(pending.extract(found));
 }
 
 void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::uint64_t action, std::uint64_t seed) {
     if (states.empty() || !pending.empty()) throw std::invalid_argument("cannot rebase empty/pending search");
     if (std::none_of(root().edges.begin(), root().edges.end(), [&](const Edge &e) {return e.semanticKey == action;}))
         throw std::invalid_argument("rebase action was not legal at previous public root");
-    append(rootKey, action); append(rootKey, publicObservation(states.front()));
+    append(rootKey, action); append(rootKey, observationKey(states.front()));
     particles = std::move(states);
     random.seed(seed); rollout.randGen.seed(seed);
     node(rootKey, particles.front());

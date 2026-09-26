@@ -51,14 +51,19 @@ struct PublicBeliefCombatSearch {
     // Max backup (single-particle / deterministic search): selection and selectedAction use each
     // edge's best backed-up value instead of its mean. Off = the historical mean backup.
     bool maxBackup = false;
+    // (Constructor argument: the root's edges are built there.) Merge edges that play identical cards (same cardKey) from different hand slots, or drink
+    // identical potions from different slots, at the same target: one edge instead of several that
+    // split the visits of one move. Off = the historical per-slot edges.
+    bool mergeIdenticalCards = false;
     // Zero is the unmodified historical control. One has explicit terminal
     // resources and excludes escapes; scoring changes are independent of NN use.
     int objectiveMode = 0;
     double victoryHp = 35.0, potionHp = 4.0, maxHpPrice = 0.0, goldHpPrice = 0.0;
     std::map<std::uint64_t, Request> pending;
+    std::vector<std::map<std::uint64_t, Request>::node_type> spareRequests;  // submitted, for reuse
 
     PublicBeliefCombatSearch(std::vector<BattleContext> states,
-                            std::uint64_t seed, int rolloutMode);
+                            std::uint64_t seed, int rolloutMode, bool mergeIdenticalCards = false);
     void search(std::int64_t budget);
     const Node &root() const;
     Action selectedAction() const;
@@ -71,7 +76,14 @@ struct PublicBeliefCombatSearch {
     double scorePrediction(double win, double hp, double potions, double maximumHp, double gold) const;
     void rebase(std::vector<BattleContext> states, std::uint64_t semanticAction, std::uint64_t seed);
     static std::uint64_t publicObservation(const BattleContext &state);
+    // Tree node keys: publicObservation's equality (same fields) with a faster hash. Seeds still use
+    // publicObservation, so search results are unchanged.
+    static std::uint64_t observationKey(const BattleContext &state);
     static std::uint64_t publicActionKey(const BattleContext &state, Action action);
+    // This search's edge key for `action` at `state` (publicActionKey, merged per mergeIdenticalCards).
+    std::uint64_t actionKey(const BattleContext &state, Action action) const;
+    // publicActionKey, except card plays / potions keyed by card (cardKey) / potion and target, not slot.
+    static std::uint64_t identityActionKey(const BattleContext &state, Action action);
     static Action mapAction(const BattleContext &source, Action action, const BattleContext &target);
     static void resampleDraw(BattleContext &target, const BattleContext &observed, std::uint64_t seed);
 private:
