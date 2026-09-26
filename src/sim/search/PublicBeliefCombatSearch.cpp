@@ -29,6 +29,38 @@ template<class Pile> void pile(std::uint64_t &hash, const Pile &cards, bool unor
     append(hash, keys.size());
     for (auto key : keys) append(hash, key);
 }
+// Fast observation key (node keys only): the same fields and the same equality as publicObservation,
+// with one 64-bit mix per value instead of byte-wise FNV.
+std::uint64_t mix64(std::uint64_t x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+struct FastHash {
+    std::uint64_t h = ROOT_KEY;
+    void add(std::uint64_t value) { h = mix64(h ^ value); }
+};
+// Injective packing of cardKey's fields (id, upgrade count, specialData, cost, costForTurn,
+// freeToPlayOnce, retain) into one word.
+std::uint64_t cardWord(const CardInstance &card) {
+    return static_cast<std::uint64_t>(static_cast<std::uint16_t>(card.id))
+        | static_cast<std::uint64_t>(static_cast<std::uint16_t>(card.specialData)) << 16
+        | static_cast<std::uint64_t>(static_cast<std::uint8_t>(card.cost)) << 32
+        | static_cast<std::uint64_t>(static_cast<std::uint8_t>(card.costForTurn)) << 40
+        | static_cast<std::uint64_t>(card.getUpgradeCount() & 0x3fff) << 48
+        | static_cast<std::uint64_t>(card.freeToPlayOnce) << 62
+        | static_cast<std::uint64_t>(card.retain) << 63;
+}
+template<class Pile> void fastPile(FastHash &hash, const Pile &cards, bool unordered) {
+    hash.add(cards.size());
+    if (unordered) {  // multiset: order-free sum of mixed card words
+        std::uint64_t sum = 0;
+        for (const auto &card : cards) sum += mix64(cardWord(card) ^ 0x5851f42d4c957f2dULL);
+        hash.add(sum);
+    } else {
+        for (const auto &card : cards) hash.add(cardWord(card));
+    }
+}
 bool drawSelection(const BattleContext &state) {
     if (state.inputState != InputState::CARD_SELECT) return false;
     switch (state.cardSelectInfo.cardSelectTask) {
@@ -143,6 +175,69 @@ std::uint64_t PublicBeliefCombatSearch::publicObservation(const BattleContext &s
     return hash;
 }
 
+std::uint64_t PublicBeliefCombatSearch::observationKey(const BattleContext &s) {
+    // Mirrors publicObservation field for field (keep them in sync).
+    FastHash hash;
+    hash.add(s.turn); hash.add(static_cast<int>(s.inputState));
+    hash.add(static_cast<int>(s.outcome));
+    const auto &p = s.player;
+    hash.add(p.curHp); hash.add(p.maxHp); hash.add(p.energy);
+    hash.add(p.energyPerTurn); hash.add(p.block); hash.add(p.strength);
+    hash.add(p.dexterity); hash.add(p.focus); hash.add(p.artifact);
+    hash.add(p.statusBits0); hash.add(p.statusBits1);
+    hash.add(p.statusMap.size());
+    for (const auto &entry : p.statusMap) {
+        hash.add(static_cast<int>(entry.first)); hash.add(entry.second);
+    }
+    hash.add(p.cardsPlayedThisTurn); hash.add(p.attacksPlayedThisTurn);
+    hash.add(p.skillsPlayedThisTurn); hash.add(p.cardsDiscardedThisTurn);
+    hash.add(p.happyFlowerCounter); hash.add(p.incenseBurnerCounter);
+    hash.add(p.inkBottleCounter); hash.add(p.nunchakuCounter);
+    hash.add(p.penNibCounter); hash.add(p.sundialCounter);
+    hash.add(p.relicBits0); hash.add(p.relicBits1);
+    hash.add(s.potionCapacity);
+    for (int i = 0; i < s.potionCapacity; ++i) hash.add(static_cast<int>(s.potions[i]));
+    hash.add(s.cards.cardsInHand);
+    for (int i = 0; i < s.cards.cardsInHand; ++i) hash.add(cardWord(s.cards.hand[i]));
+    fastPile(hash, s.cards.drawPile, !p.hasRelic<RelicId::FROZEN_EYE>());
+    fastPile(hash, s.cards.discardPile, false); fastPile(hash, s.cards.exhaustPile, false);
+    hash.add(s.monsters.monsterCount);
+    for (int i = 0; i < s.monsters.monsterCount; ++i) {
+        const auto &m = s.monsters.arr[i];
+        hash.add(static_cast<int>(m.id)); hash.add(m.curHp);
+        hash.add(m.maxHp); hash.add(m.block);
+        hash.add(m.isTargetable()); hash.add(m.halfDead);
+        hash.add(m.statusBits); hash.add(m.artifact);
+        hash.add(m.strength); hash.add(m.weak); hash.add(m.vulnerable);
+        hash.add(m.metallicize); hash.add(m.platedArmor); hash.add(m.poison);
+        hash.add(m.regen); hash.add(m.shackled);
+        if (!p.hasRelic<RelicId::RUNIC_DOME>()) {
+            hash.add(static_cast<int>(m.moveHistory[0]));
+            if (m.isTargetable()) {
+                const auto intent = m.getMoveBaseDamage(s);
+                hash.add(intent.damage); hash.add(intent.attackCount);
+            }
+        }
+        hash.add(static_cast<int>(m.moveHistory[1]));
+    }
+    if (s.inputState == InputState::CARD_SELECT) {
+        const auto &selection = s.cardSelectInfo;
+        hash.add(static_cast<int>(selection.cardSelectTask));
+        hash.add(selection.pickCount); hash.add(selection.canPickZero);
+        hash.add(selection.canPickAnyNumber);
+        hash.add(selection.data0);
+        if (selection.cardSelectTask == CardSelectTask::SCRY) {
+            for (int i = 0; i < std::min(selection.pickCount, static_cast<int>(s.cards.drawPile.size())); ++i)
+                hash.add(cardWord(s.cards.drawPile[i]));
+        }
+        if (selection.cardSelectTask == CardSelectTask::DISCOVERY
+            || selection.cardSelectTask == CardSelectTask::CODEX) {
+            for (const auto id : selection.cards) hash.add(static_cast<int>(id));
+        }
+    }
+    return hash.h;
+}
+
 PublicBeliefCombatSearch::PublicBeliefCombatSearch(
     std::vector<BattleContext> states, std::uint64_t seed, int rolloutMode)
     : particles(std::move(states)), random(seed), rollout(particles.at(0)),
@@ -233,7 +328,7 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
             break;
         }
-        append(key, at.edges[choice].semanticKey); append(key, publicObservation(current));
+        append(key, at.edges[choice].semanticKey); append(key, observationKey(current));
         at.children.insert(key);
     }
     if (current.unsupportedEffectKind != UnsupportedEffectKind::NONE)
@@ -388,7 +483,7 @@ void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::ui
     if (states.empty() || !pending.empty()) throw std::invalid_argument("cannot rebase empty/pending search");
     if (std::none_of(root().edges.begin(), root().edges.end(), [&](const Edge &e) {return e.semanticKey == action;}))
         throw std::invalid_argument("rebase action was not legal at previous public root");
-    append(rootKey, action); append(rootKey, publicObservation(states.front()));
+    append(rootKey, action); append(rootKey, observationKey(states.front()));
     particles = std::move(states);
     random.seed(seed); rollout.randGen.seed(seed);
     node(rootKey, particles.front());

@@ -71,6 +71,9 @@ struct PublicBeliefCombatSearch {
     double scorePrediction(double win, double hp, double potions, double maximumHp, double gold) const;
     void rebase(std::vector<BattleContext> states, std::uint64_t semanticAction, std::uint64_t seed);
     static std::uint64_t publicObservation(const BattleContext &state);
+    // Tree node keys: publicObservation's equality (same fields) with a faster hash. Seeds still use
+    // publicObservation, so search results are unchanged.
+    static std::uint64_t observationKey(const BattleContext &state);
     static std::uint64_t publicActionKey(const BattleContext &state, Action action);
     static Action mapAction(const BattleContext &source, Action action, const BattleContext &target);
     static void resampleDraw(BattleContext &target, const BattleContext &observed, std::uint64_t seed);
