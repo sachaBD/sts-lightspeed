@@ -55,6 +55,10 @@ struct PublicBeliefCombatSearch {
     // identical potions from different slots, at the same target: one edge instead of several that
     // split the visits of one move. Off = the historical per-slot edges.
     bool mergeIdenticalCards = false;
+    // Transpositions within a turn: a node below the turn's first node is keyed by that node and its
+    // public observation, not by the order of the moves that reached it (the tree becomes a DAG within
+    // each turn; END_TURN keeps the full history). Off = the historical history tree.
+    bool transpositions = false;
     // Zero is the unmodified historical control. One has explicit terminal
     // resources and excludes escapes; scoring changes are independent of NN use.
     int objectiveMode = 0;
@@ -87,7 +91,8 @@ struct PublicBeliefCombatSearch {
     static Action mapAction(const BattleContext &source, Action action, const BattleContext &target);
     static void resampleDraw(BattleContext &target, const BattleContext &observed, std::uint64_t seed);
 private:
-    std::uint64_t rootKey = 0xcbf29ce484222325ULL, nextRequest = 0;
+    std::uint64_t rootKey = 0xcbf29ce484222325ULL, rootTurnKey = 0xcbf29ce484222325ULL, nextRequest = 0;
+    void childKey(std::uint64_t &key, std::uint64_t &turnKey, std::uint64_t action, const BattleContext &after) const;
     void simulate(int particle, bool request = false, int rolloutTurns = -1, int rolloutSteps = 512);
     Node &node(std::uint64_t key, const BattleContext &state);
     std::size_t select(const Node &node);

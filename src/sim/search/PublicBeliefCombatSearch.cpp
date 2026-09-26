@@ -325,11 +325,22 @@ std::size_t PublicBeliefCombatSearch::select(const Node &current) {
     return selected;
 }
 
+void PublicBeliefCombatSearch::childKey(std::uint64_t &key, std::uint64_t &turnKey, std::uint64_t action,
+                                        const BattleContext &after) const {
+    if (transpositions && action != Action(ActionType::END_TURN).bits) {
+        // Within a turn: the turn's anchor and the public observation, whatever the order of the moves.
+        key = turnKey; append(key, 0x7472616e73ULL); append(key, observationKey(after));
+        return;
+    }
+    append(key, action); append(key, observationKey(after));
+    turnKey = key;
+}
+
 void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutTurns, int rolloutSteps) {
     PROF_START(T0);
     BattleContext current(particles[particle]);
     PROF_ADD(0, T0);
-    std::uint64_t key = rootKey;
+    std::uint64_t key = rootKey, turnKey = rootTurnKey;
     Path path;
     for (int depth = 0; depth < maximumActions; ++depth) {
         if (current.outcome != Outcome::UNDECIDED) break;
@@ -371,7 +382,7 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
             break;
         }
         PROF_START(T3);
-        append(key, at.edges[choice].semanticKey); append(key, observationKey(current));
+        childKey(key, turnKey, at.edges[choice].semanticKey, current);
         PROF_ADD(4, T3);
         at.children.insert(key);
     }
@@ -541,7 +552,7 @@ void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::ui
     if (states.empty() || !pending.empty()) throw std::invalid_argument("cannot rebase empty/pending search");
     if (std::none_of(root().edges.begin(), root().edges.end(), [&](const Edge &e) {return e.semanticKey == action;}))
         throw std::invalid_argument("rebase action was not legal at previous public root");
-    append(rootKey, action); append(rootKey, observationKey(states.front()));
+    childKey(rootKey, rootTurnKey, action, states.front());
     particles = std::move(states);
     random.seed(seed); rollout.randGen.seed(seed);
     node(rootKey, particles.front());
