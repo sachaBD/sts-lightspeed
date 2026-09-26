@@ -90,6 +90,26 @@ std::uint64_t PublicBeliefCombatSearch::publicActionKey(const BattleContext &sta
     return action.bits;
 }
 
+std::uint64_t PublicBeliefCombatSearch::actionKey(const BattleContext &state, Action action) const {
+    return mergeIdenticalCards ? identityActionKey(state, action) : publicActionKey(state, action);
+}
+
+std::uint64_t PublicBeliefCombatSearch::identityActionKey(const BattleContext &state, Action action) {
+    if (state.inputState == InputState::PLAYER_NORMAL) {
+        const auto type = action.getActionType();
+        if (type == ActionType::CARD || type == ActionType::POTION) {
+            auto hash = ROOT_KEY;
+            append(hash, 0x6d65726765ULL);  // domain tag: never equal to raw action bits
+            append(hash, static_cast<int>(type));
+            if (type == ActionType::CARD) append(hash, cardKey(state.cards.hand[action.getSourceIdx()]));
+            else append(hash, static_cast<int>(state.potions[action.getSourceIdx()]));
+            append(hash, action.getTargetIdx());
+            return hash;
+        }
+    }
+    return publicActionKey(state, action);
+}
+
 Action PublicBeliefCombatSearch::mapAction(const BattleContext &source, Action action,
                                          const BattleContext &target) {
     if (!drawSelection(source)) return action;
@@ -248,9 +268,10 @@ std::uint64_t PublicBeliefCombatSearch::observationKey(const BattleContext &s) {
 }
 
 PublicBeliefCombatSearch::PublicBeliefCombatSearch(
-    std::vector<BattleContext> states, std::uint64_t seed, int rolloutMode)
+    std::vector<BattleContext> states, std::uint64_t seed, int rolloutMode, bool mergeIdentical)
     : particles(std::move(states)), random(seed), rollout(particles.at(0)),
       normalization(100.0 * (35 + particles.at(0).player.maxHp + 20)) {
+    mergeIdenticalCards = mergeIdentical;
     rollout.rolloutMode = rolloutMode;
     rollout.randGen.seed(seed);
     node(ROOT_KEY, particles.front());
@@ -267,7 +288,7 @@ PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
         if (!edge.action.isValidAction(state)) {
             throw std::runtime_error("native enumeration produced an illegal belief-search action");
         }
-        const auto semanticKey = publicActionKey(state, edge.action);
+        const auto semanticKey = actionKey(state, edge.action);
         if (std::none_of(created->edges.begin(), created->edges.end(),
                         [&](const auto &item) { return item.semanticKey == semanticKey; })) {
             created->edges.push_back({edge.action, semanticKey});
