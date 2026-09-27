@@ -275,38 +275,14 @@ void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearc
             continue;
         }
 
-        if (p == Potion::FAIRY_POTION) {
-            const Action discard(ActionType::POTION, pIdx, 6);
-            if (discard.isValidAction(bc)) {
-                node.edges.push_back({discard});
-            }
-            continue;
-        }
-
-        bool addedUse = false;
+        // Discards are not legal actions; Fairy / Smoke Bomb are never drinkable.
         if (!potionRequiresTarget(p)) {
             const Action use(ActionType::POTION, pIdx, 0);
-            if (use.isValidAction(bc)) {
-                node.edges.push_back({use});
-                addedUse = true;
-            }
+            if (use.isValidAction(bc)) node.edges.push_back({use});
         } else if (hasValidTarget) {
             for (int tIdx = 0; tIdx < bc.monsters.monsterCount; ++tIdx) {
                 const Action use(ActionType::POTION, pIdx, tIdx);
-                if (use.isValidAction(bc)) {
-                    node.edges.push_back({use});
-                    addedUse = true;
-                }
-            }
-        }
-
-        // Keep a legal way to clear unusable potions (Fairy, a target potion
-        // with no target, and Smoke Bomb in a boss encounter). Never seed the
-        // search tree with an action the public environment would reject.
-        if (!addedUse) {
-            const Action discard(ActionType::POTION, pIdx, 6);
-            if (discard.isValidAction(bc)) {
-                node.edges.push_back({discard});
+                if (use.isValidAction(bc)) node.edges.push_back({use});
             }
         }
     }
