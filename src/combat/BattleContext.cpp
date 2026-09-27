@@ -3496,7 +3496,9 @@ void BattleContext::drinkPotion(int idx, int target) {
 
     // Search actions enforce this too, but keep direct simulator callers from
     // consuming a potion or escaping through an impossible boss transition.
-    if (p == Potion::SMOKE_BOMB && isBossEncounter(encounter)) {
+    // Smoke Bomb is disabled: escaping was scored as PLAYER_VICTORY, which
+    // search treats as a win. It is never generated (see getRandomPotion).
+    if (p == Potion::SMOKE_BOMB) {
         return;
     }
 

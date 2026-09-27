@@ -87,10 +87,8 @@ bool isValidPotionAction(const BattleContext &bc, const search::Action &a) {
             return false;
         }
 
-        // The base game disables Smoke Bomb in boss encounters. Allowing it
-        // here both changes gameplay and strands the run beyond the final map
-        // row when an agent attempts to escape a boss.
-        if (p == Potion::SMOKE_BOMB && isBossEncounter(bc.encounter)) {
+        // Smoke Bomb is disabled entirely (escape was scored as a victory).
+        if (p == Potion::SMOKE_BOMB) {
             return false;
         }
 
