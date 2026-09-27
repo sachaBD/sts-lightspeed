@@ -3491,7 +3491,9 @@ void BattleContext::drinkPotion(int idx, int target) {
 
     // Search actions enforce this too, but keep direct simulator callers from
     // consuming a potion or escaping through an impossible boss transition.
-    if (p == Potion::SMOKE_BOMB && isBossEncounter(encounter)) {
+    // Smoke Bomb is disabled: escaping was scored as PLAYER_VICTORY, which
+    // search treats as a win. It is never generated (see getRandomPotion).
+    if (p == Potion::SMOKE_BOMB) {
         return;
     }
 
@@ -3522,7 +3524,7 @@ void BattleContext::drinkPotion(int idx, int target) {
 
 
         case Potion::BLOOD_POTION: {
-            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 20 : 40)) / 100.0f));
+            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 40 : 20)) / 100.0f));
             addToBot(Actions::HealPlayer(healAmt));
             break;
         }

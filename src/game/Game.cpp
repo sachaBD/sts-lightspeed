@@ -321,8 +321,14 @@ Potion returnRandomPotionOfRarity(Random &potionRng, PotionRarity rarity, Charac
 }
 
 Potion getRandomPotion(Random &potionRng, CharacterClass cc) {
-    int idx = potionRng.random(PotionPool::poolSize-1); // all characters have 33 possible potions
-    return PotionPool::getPotionForClass(cc, idx);
+    // all characters have 33 possible potions. Smoke Bomb is disabled: reroll
+    // it (only consumes extra rng when Smoke Bomb would have been drawn).
+    Potion p;
+    do {
+        int idx = potionRng.random(PotionPool::poolSize-1);
+        p = PotionPool::getPotionForClass(cc, idx);
+    } while (p == Potion::SMOKE_BOMB);
+    return p;
 }
 
 
