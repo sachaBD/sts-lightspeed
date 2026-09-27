@@ -327,15 +327,12 @@ std::ostream& search::Action::printDesc(std::ostream &os, const BattleContext &b
         case ActionType::POTION: {
             const auto &p = bc.potions[getSourceIdx()];
             os << "{ ";
-            if (getTargetIdx() == -1) {
-                os << "discard potion ";
-            } else {
-                os << "drink potion ";
-            }
+            const bool discard = getTargetIdx() > 5;  // execute(): target > 5 discards
+            os << (discard ? "discard potion " : "drink potion ");
 
             os << "(" << getSourceIdx() << ") " << getPotionName(p);
 
-            if (potionRequiresTarget(p)) {
+            if (!discard && potionRequiresTarget(p)) {
                 const auto &m = bc.monsters.arr[getTargetIdx()];
                 os << " -> (" << getTargetIdx() << ") " << m.getName();
             }
