@@ -78,8 +78,8 @@ bool isValidPotionAction(const BattleContext &bc, const search::Action &a) {
     }
 
     if (a.getTargetIdx() > 5) {
-        // discard action
-        return true;
+        // Discarding a potion in combat is never a good play: not a legal search action.
+        return false;
 
     } else {
 
@@ -691,12 +691,6 @@ std::vector<search::Action> search::Action::getAllActionsInState(const BattleCon
         const auto potion = bc.potions[potionIdx];
         if (potion == Potion::EMPTY_POTION_SLOT || potion == Potion::INVALID) {
             continue;
-        }
-
-        // A target index above 5 encodes discard in the legacy action format.
-        Action discard(ActionType::POTION, potionIdx, 6);
-        if (discard.isValidAction(bc)) {
-            actions.push_back(discard);
         }
 
         if (potionRequiresTarget(potion)) {
