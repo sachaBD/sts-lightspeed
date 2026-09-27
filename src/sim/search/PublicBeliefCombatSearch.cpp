@@ -84,6 +84,17 @@ template<class Pile> void fastPile(FastHash &hash, const Pile &cards, bool unord
         for (const auto &card : cards) hash.add(cardWord(card));
     }
 }
+// Validates and normalizes priors onto edges (in edge order).
+template<class Edges> void assignPriors(Edges &edges, const std::vector<double> &priors) {
+    if (priors.size() != edges.size()) throw std::invalid_argument("prior count differs from edge count");
+    double sum = 0;
+    for (double p : priors) {
+        if (!std::isfinite(p) || p < 0) throw std::invalid_argument("invalid prior probability");
+        sum += p;
+    }
+    if (!(sum > 0)) throw std::invalid_argument("empty prior support");
+    for (std::size_t i = 0; i < edges.size(); ++i) edges[i].prior = priors[i] / sum;
+}
 bool drawSelection(const BattleContext &state) {
     if (state.inputState != InputState::CARD_SELECT) return false;
     switch (state.cardSelectInfo.cardSelectTask) {
@@ -286,6 +297,7 @@ PublicBeliefCombatSearch::PublicBeliefCombatSearch(
     : particles(std::move(states)), random(seed), rollout(particles.at(0)),
       normalization(100.0 * (35 + particles.at(0).player.maxHp + 20)) {
     mergeIdenticalCards = mergeIdentical;
+    normalizationMaxHp = particles.front().player.maxHp;
     rollout.rolloutMode = rolloutMode;
     rollout.randGen.seed(seed);
     node(ROOT_KEY, particles.front());
@@ -314,6 +326,7 @@ PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
                   [](const auto &a, const auto &b) { return a.semanticKey < b.semanticKey; });
     }
     std::shuffle(created->edges.begin(), created->edges.end(), random);
+    if (policyPriors) for (auto &edge : created->edges) edge.prior = 1.0 / created->edges.size();
     auto *result = created.get(); nodes.emplace(key, std::move(created));
     return *result;
 }
@@ -339,19 +352,67 @@ std::size_t PublicBeliefCombatSearch::select(const Node &current) {
     return selected;
 }
 
+// PUCT with first-play urgency. fpuBase: this node's mean backed-up value, else its own leaf value,
+// else (evaluation still pending) the parent's base, passed in. Unvisited edges score Q = base -
+// fpuReduction; in-flight edges keep the historical virtual loss Q = valueSum / (visits + inFlight).
+std::size_t PublicBeliefCombatSearch::selectPuct(const Node &current, double &fpuBase) const {
+    if (current.visits > 0) {
+        double sum = 0;
+        for (const auto &edge : current.edges) sum += edge.valueSum;
+        fpuBase = sum / current.visits;
+    } else if (current.evaluated) {
+        fpuBase = current.value;
+    }
+    const double fpu = fpuBase - fpuReduction;
+    const double sqrtParent = std::sqrt(current.visits + current.inFlight + 1.0);
+    double best = -std::numeric_limits<double>::infinity();
+    std::size_t selected = 0;
+    for (std::size_t i = 0; i < current.edges.size(); ++i) {
+        const auto &edge = current.edges[i];
+        const auto visits = edge.visits + edge.inFlight;
+        const double value = visits == 0 ? fpu : maxBackup && edge.visits ? edge.best : edge.valueSum / visits;
+        const double score = value + cPuct * edge.prior * sqrtParent / (1 + visits);
+        if (score > best) { best = score; selected = i; }
+    }
+    return selected;
+}
+
+void PublicBeliefCombatSearch::addRequest(const BattleContext &state, Path &&path, Node *child) {
+    // Reuse a submitted request's map node: no allocation, and copy-assignment keeps the state's
+    // pile capacity.
+    Request *slot;
+    if (spareRequests.empty()) {
+        slot = &pending.emplace_hint(pending.end(), std::piecewise_construct,
+                                     std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
+    } else {
+        auto handle = std::move(spareRequests.back());
+        spareRequests.pop_back();
+        handle.key() = ++nextRequest;
+        slot = &pending.insert(pending.end(), std::move(handle))->second;
+    }
+    slot->state = state; slot->path = std::move(path); slot->child = child;
+}
+
 void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutTurns, int rolloutSteps) {
     PROF_START(T0);
     BattleContext current(particles[particle]);
     PROF_ADD(0, T0);
     std::uint64_t key = rootKey;
     Path path;
+    if (policyPriors && !rootRequested) {  // the root's own evaluation is the first leaf
+        rootRequested = true;
+        addRequest(current, std::move(path), nodes.at(rootKey).get());
+        return;
+    }
+    Node *leaf = nullptr;
+    double fpuBase = 0;
     for (int depth = 0; depth < maximumActions; ++depth) {
         if (current.outcome != Outcome::UNDECIDED) break;
         PROF_START(T1);
         auto &at = node(key, current);
         PROF_ADD(1, T1);
         PROF_START(T1b);
-        auto choice = select(at);
+        auto choice = policyPriors ? selectPuct(at, fpuBase) : select(at);
         PROF_ADD(2, T1b);
         auto action = at.edges[choice].action;
         if (drawSelection(current)) {
@@ -380,7 +441,7 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         PROF_START(T2);
         action.execute(current);
         PROF_ADD(3, T2);
-        if (unvisited) {
+        if (unvisited && !policyPriors) {
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
             break;
         }
@@ -388,24 +449,18 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         append(key, at.edges[choice].semanticKey); append(key, observationKey(current));
         PROF_ADD(4, T3);
         at.children.insert(key);
+        // Expand at evaluation: a public child never reached before (a new edge, or a new chance
+        // outcome of a visited one) is created now and becomes this simulation's leaf.
+        if (policyPriors && current.outcome == Outcome::UNDECIDED && !nodes.count(key)) {
+            leaf = &node(key, current);
+            break;
+        }
     }
     if (current.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in unified public combat search");
     if (request && current.outcome == Outcome::UNDECIDED) {
         PROF_START(T4);
-        // Reuse a submitted request's map node: no allocation, and copy-assignment keeps the state's
-        // pile capacity.
-        if (spareRequests.empty()) {
-            auto &slot = pending.emplace_hint(pending.end(), std::piecewise_construct,
-                                              std::forward_as_tuple(++nextRequest), std::forward_as_tuple())->second;
-            slot.state = current; slot.path = std::move(path);
-        } else {
-            auto handle = std::move(spareRequests.back());
-            spareRequests.pop_back();
-            handle.key() = ++nextRequest;
-            handle.mapped().state = current; handle.mapped().path = std::move(path);
-            pending.insert(pending.end(), std::move(handle));
-        }
+        addRequest(current, std::move(path), leaf);
         PROF_ADD(5, T4);
         return;
     }
@@ -462,6 +517,7 @@ void PublicBeliefCombatSearch::boundedRollout(BattleContext &state, int turns, i
 
 void PublicBeliefCombatSearch::search(std::int64_t budget) {
     if (budget <= 0 || !pending.empty()) throw std::invalid_argument("invalid or pending public search budget");
+    if (policyPriors) throw std::logic_error("policy-prior search needs leaf evaluations (requestBatch)");
     // Draw independently from the root belief. Cycling deterministically can
     // phase-lock the UCT action schedule to particle identity and bias values.
     std::uniform_int_distribution<int> sample(0, static_cast<int>(particles.size()) - 1);
@@ -485,17 +541,41 @@ Action PublicBeliefCombatSearch::selectedAction() const {
 }
 
 void PublicBeliefCombatSearch::setRootPrior(const std::vector<double> &priors, double strength) {
-    auto &edges = nodes.at(rootKey)->edges;
-    if (priors.size() != edges.size() || !std::isfinite(strength) || strength < 0)
-        throw std::invalid_argument("invalid unified root prior");
-    double sum = 0;
-    for (double p : priors) {
-        if (!std::isfinite(p) || p < 0) throw std::invalid_argument("invalid prior probability");
-        sum += p;
-    }
-    if (!(sum > 0)) throw std::invalid_argument("empty prior support");
-    for (std::size_t i = 0; i < edges.size(); ++i) edges[i].prior = priors[i] / sum;
+    if (policyPriors) throw std::logic_error("root prior cannot be combined with policy-prior mode");
+    if (!std::isfinite(strength) || strength < 0) throw std::invalid_argument("invalid unified root prior");
+    assignPriors(nodes.at(rootKey)->edges, priors);
     priorStrength = strength;
+}
+
+void PublicBeliefCombatSearch::enablePolicyPriors(double puct, double reduction, double alpha, double epsilon,
+                                                  std::uint64_t noiseSeed) {
+    if (simulations || root().visits || !pending.empty())
+        throw std::logic_error("policy-prior mode must be enabled before any evidence");
+    if (objectiveMode != 1) throw std::logic_error("policy-prior mode requires objectiveMode 1");
+    if (priorStrength > 0) throw std::logic_error("policy-prior mode cannot be combined with a root prior");
+    if (!std::isfinite(puct) || puct <= 0 || !std::isfinite(reduction) || !std::isfinite(alpha) || alpha < 0
+        || !std::isfinite(epsilon) || epsilon < 0 || epsilon > 1 || (epsilon > 0 && alpha <= 0))
+        throw std::invalid_argument("invalid policy-prior parameters");
+    policyPriors = true;
+    cPuct = puct; fpuReduction = reduction; dirichletAlpha = alpha; dirichletEpsilon = epsilon;
+    noiseRandom.seed(noiseSeed);
+    rootRequested = false; rootNoised = false;
+    for (auto &[key, n] : nodes) for (auto &edge : n->edges) edge.prior = 1.0 / n->edges.size();
+}
+
+// Root exploration noise: P = (1 - epsilon) P + epsilon Dirichlet(alpha), once per root, after the
+// root's own priors are known.
+void PublicBeliefCombatSearch::applyRootNoise() {
+    auto &at = *nodes.at(rootKey);
+    if (!policyPriors || dirichletEpsilon <= 0 || rootNoised || !at.evaluated) return;
+    rootNoised = true;
+    std::gamma_distribution<double> gamma(dirichletAlpha, 1.0);
+    std::vector<double> noise(at.edges.size());
+    double sum = 0;
+    for (auto &x : noise) sum += x = gamma(noiseRandom);
+    if (!(sum > 0)) return;
+    for (std::size_t i = 0; i < noise.size(); ++i)
+        at.edges[i].prior = (1 - dirichletEpsilon) * at.edges[i].prior + dirichletEpsilon * noise[i] / sum;
 }
 
 void PublicBeliefCombatSearch::setObjective(int mode, double victory, double potion, double maximumHp, double gold) {
@@ -503,7 +583,10 @@ void PublicBeliefCombatSearch::setObjective(int mode, double victory, double pot
         throw std::invalid_argument("objective is immutable once evidence exists");
     for (double v : {victory, potion, maximumHp, gold})
         if (!std::isfinite(v) || v < 0) throw std::invalid_argument("invalid objective coefficient");
+    if (policyPriors && mode != 1) throw std::logic_error("policy-prior mode requires objectiveMode 1");
     objectiveMode = mode; victoryHp = victory; potionHp = potion; maxHpPrice = maximumHp; goldHpPrice = gold;
+    normalizationMaxHp = particles.front().player.maxHp;
+    if (mode == 0) normalization = 100.0 * (35 + normalizationMaxHp + 20);  // as constructed
     if (mode == 1) normalization = 100 * (victoryHp + particles.front().player.maxHp + 5*potionHp
                                        + maxHpPrice*particles.front().player.maxHp + goldHpPrice*particles.front().player.gold + 1);
 }
@@ -523,19 +606,34 @@ std::vector<std::uint64_t> PublicBeliefCombatSearch::requestBatch(int count, std
                                                                int turns, int steps) {
     if (count < 1 || budget <= simulations || turns < 0 || steps < 0 || !pending.empty())
         throw std::invalid_argument("invalid batched leaf request");
+    if (policyPriors && (turns != 0 || steps != 0))
+        throw std::invalid_argument("policy-prior mode evaluates the leaf itself: no rollout bounds");
     const auto first = nextRequest;
     std::uniform_int_distribution<int> sample(0, static_cast<int>(particles.size())-1);
-    for (int n = 0; n < count && simulations + static_cast<std::int64_t>(pending.size()) < budget; ++n)
+    for (int n = 0; n < count && simulations + static_cast<std::int64_t>(pending.size()) < budget; ++n) {
         simulate(particles.size() == 1 ? 0 : sample(random), true, turns, steps);
+        if (policyPriors && !nodes.at(rootKey)->evaluated) break;  // nothing to steer by before the root's priors
+    }
     std::vector<std::uint64_t> result;
     for (const auto &[id, request] : pending) if (id > first) result.push_back(id);
     return result;
 }
 
 void PublicBeliefCombatSearch::submit(std::uint64_t id, double value) {
+    submit(id, value, {});
+}
+
+void PublicBeliefCombatSearch::submit(std::uint64_t id, double value, const std::vector<double> &priors) {
     auto found = pending.find(id);
     if (found == pending.end() || !std::isfinite(value) || value < -.1 || value > 2)
         throw std::invalid_argument("invalid unified leaf submission");
+    auto *child = found->second.child;
+    if (!priors.empty() && !child) throw std::invalid_argument("priors for a request without a leaf node");
+    if (child && !child->evaluated) {  // first evaluation of a node wins
+        if (!priors.empty()) assignPriors(child->edges, priors);
+        child->evaluated = true; child->value = value;
+        if (child == nodes.at(rootKey).get()) applyRootNoise();
+    }
     backup(found->second.path, value, nullptr);
     spareRequests.push_back(pending.extract(found));
 }
@@ -547,7 +645,12 @@ void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
     boundedRollout(state, -1, maximumActions);
     if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in guided leaf");
-    backup(found->second.path, terminalValue(state), &state);
+    const auto value = terminalValue(state);
+    if (auto *child = found->second.child; child && !child->evaluated) {  // keeps uniform priors
+        child->evaluated = true; child->value = value;
+        if (child == nodes.at(rootKey).get()) applyRootNoise();
+    }
+    backup(found->second.path, value, &state);
     spareRequests.push_back(pending.extract(found));
 }
 
@@ -571,6 +674,11 @@ void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::ui
         if (!keep.count(it->first)) it = nodes.erase(it); else ++it;
     }
     retainedNodes = nodes.size(); retainedVisits = root().visits;
+    if (policyPriors) {  // a retained root keeps its priors; a new one is requested first
+        rootRequested = root().evaluated; rootNoised = false;
+        noiseRandom.seed(seed ^ 0x6e6f697365ULL);
+        applyRootNoise();
+    }
     simulations = terminalEvaluations = unresolvedEvaluations = neuralEvaluations = 0;
 }
 }
