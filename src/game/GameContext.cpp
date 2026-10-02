@@ -393,7 +393,9 @@ bool GameContext::canAddOneTimeEvent(Event shrine) const {
             return gold >= 50;
 
         case Event::SECRET_PORTAL:
-            return act == 3 && !speedrunPace;
+            // Disabled: the portal jump to the boss advances floorNum only once
+            // instead of to the boss floor. Never offer it.
+            return false;
 
         default:
             return true;
@@ -892,7 +894,10 @@ void GameContext::setupEvent() { // todo necronomicon event
         case Event::FALLING: { // todo test and CANNOT BE BOTTLED
             int counts[3] {0,0,0};
             for (const auto &c : deck.cards) {
-                ++counts[static_cast<int>(c.getType())];
+                const int type = static_cast<int>(c.getType());
+                if (type >= 0 && type < 3) { // curses/statuses are not candidates
+                    ++counts[type];
+                }
             }
 
             int attacksIdx = counts[0] > 0 ? miscRng.random(counts[0] - 1) : -1;
