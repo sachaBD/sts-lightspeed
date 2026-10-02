@@ -806,7 +806,7 @@ void ConsoleSimulator::printEventActions(std::ostream &os) const {
             bool haveNoOptions =
                     gc->info.skillCardDeckIdx == -1 &&
                     gc->info.powerCardDeckIdx == -1 &&
-                    gc->info.powerCardDeckIdx == -1;
+                    gc->info.attackCardDeckIdx == -1;
 
             if (haveNoOptions) {
                 os << "3: [Splat] Lose nothing?\n";
