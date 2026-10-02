@@ -7,6 +7,7 @@
 #include "sim/search/SimpleAgent.h"
 
 #include <utility>
+#include <stdexcept>
 #include <string>
 #include <memory>
 
@@ -407,6 +408,34 @@ int search::BattleScumSearcher2::engineRolloutAction(const Node &node, const Bat
     return selected;
 }
 
+namespace {
+// The heuristic sees only the current hand and public intent. It does
+// not inspect shuffle/RNG state. Stochastic support remains available
+// to discover actions/combinations omitted by that weak policy.
+search::Action guidedRolloutPlay(const BattleContext &state) {
+    thread_local search::SimpleAgent guide;
+    thread_local GameContext context;
+    context.act = std::clamp((state.floorNum - 1) / 17 + 1, 1, 3);
+    guide.curGameContext = &context;
+    return guide.suggestBattleCardPlay(state);
+}
+
+// A rollout policy, not a legal-action filter. Ending the turn retains
+// positive support (important for Spikers, curses and self-damage cards),
+// but does not get the same mass as using an available card. This tests
+// the large number of deliberately wasted turns in uniform playouts.
+int weightedRolloutIndex(const search::BattleScumSearcher2::Node &node, std::default_random_engine &randGen) {
+    std::vector<double> weights;
+    weights.reserve(node.edges.size());
+    for (const auto &edge : node.edges) {
+        const auto type = edge.action.getActionType();
+        weights.push_back(type == search::ActionType::END_TURN ? 0.03
+            : type == search::ActionType::POTION ? 0.20 : 1.0);
+    }
+    return std::discrete_distribution<int>(weights.begin(), weights.end())(randGen);
+}
+}
+
 int search::BattleScumSearcher2::selectRolloutAction(const Node &node, const BattleContext &state) {
     if (rolloutMode == 3 && std::bernoulli_distribution(0.8)(randGen)) {
         const int preferred = engineRolloutAction(node, state);
@@ -418,30 +447,68 @@ int search::BattleScumSearcher2::selectRolloutAction(const Node &node, const Bat
     if ((rolloutMode == 2 || rolloutMode == 3)
         && !state.player.hasRelic<RelicId::RUNIC_DOME>()
         && std::bernoulli_distribution(0.8)(randGen)) {
-        // The heuristic sees only the current hand and public intent. It does
-        // not inspect shuffle/RNG state. Stochastic support remains available
-        // to discover actions/combinations omitted by that weak policy.
-        thread_local SimpleAgent guide;
-        thread_local GameContext context;
-        context.act = std::clamp((state.floorNum - 1) / 17 + 1, 1, 3);
-        guide.curGameContext = &context;
-        const auto bits = guide.suggestBattleCardPlay(state).bits;
+        const auto bits = guidedRolloutPlay(state).bits;
         for (std::size_t i = 0; i < node.edges.size(); ++i) {
             if (node.edges[i].action.bits == bits) return static_cast<int>(i);
         }
     }
-    // A rollout policy, not a legal-action filter. Ending the turn retains
-    // positive support (important for Spikers, curses and self-damage cards),
-    // but does not get the same mass as using an available card. This tests
-    // the large number of deliberately wasted turns in uniform playouts.
-    std::vector<double> weights;
-    weights.reserve(node.edges.size());
-    for (const auto &edge : node.edges) {
-        const auto type = edge.action.getActionType();
-        weights.push_back(type == ActionType::END_TURN ? 0.03
-            : type == ActionType::POTION ? 0.20 : 1.0);
+    return weightedRolloutIndex(node, randGen);
+}
+
+search::Action search::BattleScumSearcher2::rolloutAction(Node &scratch, const BattleContext &state) {
+    // Mode 2 at PLAYER_NORMAL without Runic Dome is selectRolloutAction's guided branch: one bernoulli draw,
+    // then the SimpleAgent move if it is an enumerated edge, else the weighted draw over all edges. Only
+    // the fallback needs the edges. Every other case goes through selectRolloutAction unchanged.
+    const bool guided = rolloutMode == 2 && state.inputState == InputState::PLAYER_NORMAL
+        && !state.player.hasRelic<RelicId::RUNIC_DOME>();
+    if (guided && std::bernoulli_distribution(0.8)(randGen)) {
+        const auto suggested = guidedRolloutPlay(state);
+        if (enumerates(state, suggested)) return suggested;
     }
-    return std::discrete_distribution<int>(weights.begin(), weights.end())(randGen);
+    scratch.edges.clear();
+    enumerateActionsForNode(scratch, state);
+    if (scratch.edges.empty()) throw std::runtime_error("empty public rollout support");
+    return scratch.edges[guided ? weightedRolloutIndex(scratch, randGen) : selectRolloutAction(scratch, state)].action;
+}
+
+bool search::BattleScumSearcher2::enumerates(const BattleContext &bc, Action action) {
+    // Mirrors enumerateCardActions / enumeratePotionActions / the END_TURN edge (keep them in sync).
+    if (bc.inputState != InputState::PLAYER_NORMAL) return false;
+    const int source = action.getSourceIdx(), target = action.getTargetIdx();
+    switch (action.getActionType()) {
+        case ActionType::END_TURN:
+            return action.bits == Action(ActionType::END_TURN).bits;
+        case ActionType::CARD: {
+            if (!bc.isCardPlayAllowed() || source >= bc.cards.cardsInHand) return false;
+            const auto &c = bc.cards.hand[source];
+            if (!c.canUseOnAnyTarget(bc)) return false;
+            if (source > 0) {
+                const auto &last = bc.cards.hand[source-1];
+                if (c.id == last.id && c.getUpgradeCount() == last.getUpgradeCount()
+                    && c.costForTurn == last.costForTurn && c.cost == last.cost
+                    && c.freeToPlayOnce == last.freeToPlayOnce && c.specialData == last.specialData) {
+                    return false;  // a duplicate of the previous slot: not its own edge
+                }
+            }
+            if (c.requiresTarget()) {
+                return target < bc.monsters.monsterCount && bc.monsters.arr[target].isTargetable()
+                    && action.bits == Action(ActionType::CARD, source, target).bits;
+            }
+            return action.bits == Action(ActionType::CARD, source).bits;
+        }
+        case ActionType::POTION: {
+            if (source >= bc.potionCapacity) return false;
+            const auto p = bc.potions[source];
+            if (p == Potion::EMPTY_POTION_SLOT || p == Potion::INVALID) return false;
+            if (!potionRequiresTarget(p)) {
+                return action.bits == Action(ActionType::POTION, source, 0).bits && action.isValidAction(bc);
+            }
+            return bc.monsters.getTargetableCount() > 0 && target < bc.monsters.monsterCount
+                && action.bits == Action(ActionType::POTION, source, target).bits && action.isValidAction(bc);
+        }
+        default:
+            return false;
+    }
 }
 
 template <typename ForwardIt>
