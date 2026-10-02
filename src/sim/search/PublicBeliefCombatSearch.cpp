@@ -506,11 +506,8 @@ void PublicBeliefCombatSearch::boundedRollout(BattleContext &state, int turns, i
     const auto startTurn = state.turn;
     for (int step = 0; step < std::min(steps, maximumActions) && state.outcome == Outcome::UNDECIDED; ++step) {
         if (turns >= 0 && state.turn - startTurn >= turns) break;
-        temporary.edges.clear();
-        rollout.enumerateActionsForNode(temporary, state);
-        if (temporary.edges.empty()) throw std::runtime_error("empty public rollout support");
-        const auto choice = rollout.selectRolloutAction(temporary, state);
-        temporary.edges[choice].action.execute(state);
+        // Same move and draws as enumerate + selectRolloutAction; enumerates only when needed.
+        rollout.rolloutAction(temporary, state).execute(state);
     }
     // An unfinished rollout is unresolved evidence, never a victory.
 }

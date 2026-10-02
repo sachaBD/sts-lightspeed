@@ -68,6 +68,13 @@ namespace sts::search {
         int selectBestEdgeToSearch(const Node &cur);
         int selectFirstActionForLeafNode(const Node &leafNode);
         int selectRolloutAction(const Node &node, const BattleContext &state);
+        // The rollout move at `state`: the same move and the same randGen draws as enumerateActionsForNode
+        // into `scratch` followed by selectRolloutAction, but the legal actions are enumerated (into
+        // `scratch`) only when the choice needs them, not when the guided (SimpleAgent) move is taken.
+        // Throws if there is no legal action.
+        Action rolloutAction(Node &scratch, const BattleContext &state);
+        // Whether enumerateActionsForNode(state) lists an edge with exactly these bits (PLAYER_NORMAL).
+        static bool enumerates(const BattleContext &state, Action action);
         // Public current-state guidance for coherent exhaust/block setup.
         // A preference only: complete legal support remains in the search.
         static int engineRolloutAction(const Node &node, const BattleContext &state);
