@@ -440,6 +440,7 @@ void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutT
         path.emplace_back(&at, choice);
         PROF_START(T2);
         action.execute(current);
+        maximumTreeTurns = std::max(maximumTreeTurns, current.turn - particles.front().turn);
         PROF_ADD(3, T2);
         if (unvisited && !policyPriors) {
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
@@ -477,6 +478,8 @@ double PublicBeliefCombatSearch::terminalValue(const BattleContext &state) const
 }
 
 void PublicBeliefCombatSearch::backup(Path &path, double value, const BattleContext *terminal) {
+    treeActions += path.size();
+    maximumTreeDepth = std::max(maximumTreeDepth, static_cast<int>(path.size()));
     const bool resolved = terminal && terminal->outcome != Outcome::UNDECIDED;
     const bool won = resolved && terminal->outcome == Outcome::PLAYER_VICTORY
         && terminal->player.curHp > 0 && !terminal->escapedCombat;
@@ -676,6 +679,7 @@ void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::ui
         noiseRandom.seed(seed ^ 0x6e6f697365ULL);
         applyRootNoise();
     }
-    simulations = terminalEvaluations = unresolvedEvaluations = neuralEvaluations = 0;
+    simulations = terminalEvaluations = unresolvedEvaluations = neuralEvaluations = treeActions = 0;
+    maximumTreeDepth = maximumTreeTurns = 0;
 }
 }

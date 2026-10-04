@@ -12,3 +12,8 @@ set_target_properties(sts_lightspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sts_lightspeed PRIVATE -Wno-shift-count-overflow)
 endif()
+
+add_executable(persistence-boss-benchmark tests/persistence_boss_benchmark.cpp)
+target_link_libraries(persistence-boss-benchmark PRIVATE sts_lightspeed)
+add_executable(persistence-smoke tests/persistence_smoke.cpp)
+target_link_libraries(persistence-smoke PRIVATE sts_lightspeed)

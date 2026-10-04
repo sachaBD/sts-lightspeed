@@ -53,6 +53,8 @@ struct PublicBeliefCombatSearch {
     double exploration = 0.7;
     std::int64_t simulations = 0;
     std::int64_t terminalEvaluations = 0, unresolvedEvaluations = 0, neuralEvaluations = 0;
+    std::int64_t treeActions = 0;
+    int maximumTreeDepth = 0, maximumTreeTurns = 0;
     std::int64_t retainedVisits = 0;
     std::size_t retainedNodes = 0;
     double priorStrength = 0.0;
