@@ -2,6 +2,7 @@
 #define STS_PUBLIC_BELIEF_COMBAT_SEARCH_H
 
 #include "sim/search/BattleScumSearcher2.h"
+#include "sim/search/SearchState.h"
 #include <cstdint>
 #include <array>
 #include <limits>
@@ -12,10 +13,11 @@
 
 namespace sts::search {
 
-// Experimental root-sampled action/observation-history tree. All particles
-// share one policy at identical public histories, unlike independent perfect-
-// information searches followed by an average of their root values.
+// Root-sampled public-belief DAG. Within a player turn, identical complete
+// observation-conditioned particle cohorts share continuations. Per-particle
+// hidden states never choose separate policies at the same public history.
 struct PublicBeliefCombatSearch {
+    struct Particle { int id; BattleContext state; };
     struct Edge {
         Action action;
         std::uint64_t semanticKey = 0;
@@ -28,8 +30,12 @@ struct PublicBeliefCombatSearch {
         double best = -std::numeric_limits<double>::infinity();  // max backed-up value
         // Actual terminal win, surviving HP, potions, max HP, gold; not guesses.
         std::array<double, 5> outcomeSum{};
+        // Lazy transition cache, indexed by the parent node's cohort.
+        std::vector<std::uint64_t> successors;
     };
     struct Node {
+        std::uint64_t key = 0, scope = 0, history = 0;
+        std::vector<Particle> belief;
         std::int64_t visits = 0;
         std::vector<Edge> edges;
         int inFlight = 0;
@@ -55,19 +61,16 @@ struct PublicBeliefCombatSearch {
     std::int64_t terminalEvaluations = 0, unresolvedEvaluations = 0, neuralEvaluations = 0;
     std::int64_t retainedVisits = 0;
     std::size_t retainedNodes = 0;
+    std::int64_t transpositionHits = 0, expandedTransitions = 0, cachedParticleStates = 0;
     double priorStrength = 0.0;
     // Policy-prior mode (enablePolicyPriors): every node is expanded when its leaf is evaluated and
-    // selects by PUCT with first-play urgency. Off = the historical UCB1 search, bit for bit.
+    // selects by PUCT with first-play urgency. Otherwise selects by UCB1.
     bool policyPriors = false;
     double cPuct = 1.5, fpuReduction = 0.15;
     double dirichletAlpha = 0.0, dirichletEpsilon = 0.0;  // root noise, off by default
     // Max backup (single-particle / deterministic search): selection and selectedAction use each
-    // edge's best backed-up value instead of its mean. Off = the historical mean backup.
+    // edge's best backed-up value instead of its mean.
     bool maxBackup = false;
-    // (Constructor argument: the root's edges are built there.) Merge edges that play identical cards (same cardKey) from different hand slots, or drink
-    // identical potions from different slots, at the same target: one edge instead of several that
-    // split the visits of one move. Off = the historical per-slot edges.
-    bool mergeIdenticalCards = false;
     // Zero is the unmodified historical control. One has explicit terminal
     // resources and excludes escapes; scoring changes are independent of NN use.
     int objectiveMode = 0;
@@ -76,7 +79,7 @@ struct PublicBeliefCombatSearch {
     std::vector<std::map<std::uint64_t, Request>::node_type> spareRequests;  // submitted, for reuse
 
     PublicBeliefCombatSearch(std::vector<BattleContext> states,
-                            std::uint64_t seed, int rolloutMode, bool mergeIdenticalCards = false);
+                            std::uint64_t seed, int rolloutMode);
     void search(std::int64_t budget);
     const Node &root() const;
     Action selectedAction() const;
@@ -102,13 +105,9 @@ struct PublicBeliefCombatSearch {
     double scorePrediction(double win, double hp, double potions, double maximumHp, double gold) const;
     void rebase(std::vector<BattleContext> states, std::uint64_t semanticAction, std::uint64_t seed);
     static std::uint64_t publicObservation(const BattleContext &state);
-    // Tree node keys: publicObservation's equality (same fields) with a faster hash. Seeds still use
-    // publicObservation, so search results are unchanged.
     static std::uint64_t observationKey(const BattleContext &state);
     static std::uint64_t publicActionKey(const BattleContext &state, Action action);
-    // This search's edge key for `action` at `state` (publicActionKey, merged per mergeIdenticalCards).
     std::uint64_t actionKey(const BattleContext &state, Action action) const;
-    // publicActionKey, except card plays / potions keyed by card (cardKey) / potion and target, not slot.
     static std::uint64_t identityActionKey(const BattleContext &state, Action action);
     static Action mapAction(const BattleContext &source, Action action, const BattleContext &target);
     static void resampleDraw(BattleContext &target, const BattleContext &observed, std::uint64_t seed);
@@ -119,7 +118,11 @@ private:
     std::mt19937_64 noiseRandom;
     void simulate(int particle, bool request = false, int rolloutTurns = -1, int rolloutSteps = 512);
     void addRequest(const BattleContext &state, Path &&path, Node *child);
-    Node &node(std::uint64_t key, const BattleContext &state);
+    static std::vector<std::uint64_t> signatureWords(const std::vector<Particle> &belief,
+                                                     std::uint64_t scope, std::uint64_t history);
+    Node &node(std::vector<Particle> belief, std::uint64_t scope, std::uint64_t history);
+    void expand(Node &parent, std::size_t edge);
+    static std::size_t particleIndex(const Node &node, int id);
     std::size_t select(const Node &node);
     std::size_t selectPuct(const Node &node, double &fpuBase) const;
     void applyRootNoise();

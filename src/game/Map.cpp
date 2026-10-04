@@ -132,7 +132,7 @@ void MapNode::addParent(int parent) {
     parents[parentCount++] = parent;
 }
 
-inline void MapNode::addEdge(int edge) {
+void MapNode::addEdge(int edge) {
     int cur = 0;
     while (true) {
         if (cur == edgeCount) {
@@ -153,17 +153,17 @@ inline void MapNode::addEdge(int edge) {
     }
 }
 
-inline int MapNode::getMaxEdge() const {
+int MapNode::getMaxEdge() const {
 //    assert(edgeCount > 0);
     return edges.at(edgeCount-1);
 }
 
-inline int MapNode::getMinEdge() const {
+int MapNode::getMinEdge() const {
 //    assert(edgeCount > 0);
     return edges.at(0);
 }
 
-inline int MapNode::getMaxXParent() const {
+int MapNode::getMaxXParent() const {
     int maxParent = parents[0];
     for (int i = 1; i < parentCount; i++) {
         if (parents[i] > maxParent) {
@@ -173,7 +173,7 @@ inline int MapNode::getMaxXParent() const {
     return maxParent;
 }
 
-inline int MapNode::getMinXParent() const {
+int MapNode::getMinXParent() const {
     int minParent = parents[0];
     for (int i = 1; i < parentCount; i++) {
         if (parents[i] < minParent) {
