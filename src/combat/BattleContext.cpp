@@ -4257,7 +4257,8 @@ void BattleContext::chooseDualWieldCard(int handIdx) {
 void BattleContext::chooseDiscardToHandCard(int discardIdx, bool forZeroCost) {
     CardInstance c = cards.discardPile[discardIdx];
     cards.removeFromDiscard(discardIdx);
-    if (cardSelectInfo.cardSelectTask == CardSelectTask::LIQUID_MEMORIES_POTION) {
+    // The one-card fast path never opens a selection screen; its task can be stale.
+    if (forZeroCost) {
         c.setCostForTurn(0);
     }
     moveToHandHelper(c);

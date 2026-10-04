@@ -12,3 +12,7 @@ set_target_properties(sts_lightspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sts_lightspeed PRIVATE -Wno-shift-count-overflow)
 endif()
+
+# Opt-in regression executable; production/library builds do not build it by default.
+add_executable(sts_liquid_memories_test EXCLUDE_FROM_ALL tests/liquid_memories_test.cpp)
+target_link_libraries(sts_liquid_memories_test PRIVATE sts_lightspeed)
