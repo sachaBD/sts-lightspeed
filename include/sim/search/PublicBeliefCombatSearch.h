@@ -7,17 +7,18 @@
 #include <array>
 #include <limits>
 #include <map>
+#include <optional>
 #include <random>
 #include <unordered_set>
 #include <unordered_map>
 
 namespace sts::search {
 
-// Root-sampled public-belief DAG. Within a player turn, identical complete
-// observation-conditioned particle cohorts share continuations. Per-particle
-// hidden states never choose separate policies at the same public history.
+// Persistent public-state search DAG. Equivalent public decision problems share
+// continuation evidence; each simulation still executes its own sampled hidden future.
+// This deliberately approximates belief-history equality, not simulator transitions.
 struct PublicBeliefCombatSearch {
-    struct Particle { int id; BattleContext state; };
+    struct Node;
     struct Edge {
         Action action;
         std::uint64_t semanticKey = 0;
@@ -30,19 +31,19 @@ struct PublicBeliefCombatSearch {
         double best = -std::numeric_limits<double>::infinity();  // max backed-up value
         // Actual terminal win, surviving HP, potions, max HP, gold; not guesses.
         std::array<double, 5> outcomeSum{};
-        // Lazy transition cache, indexed by the parent node's cohort.
-        std::vector<std::uint64_t> successors;
+        std::unordered_set<std::uint64_t> children;
+        std::optional<std::uint64_t> lastChildKey; // membership cache, not a hidden transition
     };
     struct Node {
-        std::uint64_t key = 0, scope = 0, history = 0;
-        std::vector<Particle> belief;
+        std::uint64_t key = 0;
+        std::vector<std::uint64_t> signature;
+        bool expanded = false;
         std::int64_t visits = 0;
         std::vector<Edge> edges;
         int inFlight = 0;
-        std::unordered_set<std::uint64_t> children;
         // Policy-prior mode only: the leaf evaluation of this node has been submitted, and its value.
         // Until then its edges carry uniform priors.
-        bool evaluated = false;
+        bool evaluated = false, evaluationPending = false;
         double value = 0;
     };
     using Path = std::vector<std::pair<Node *, std::size_t>>;
@@ -61,7 +62,8 @@ struct PublicBeliefCombatSearch {
     std::int64_t terminalEvaluations = 0, unresolvedEvaluations = 0, neuralEvaluations = 0;
     std::int64_t retainedVisits = 0;
     std::size_t retainedNodes = 0;
-    std::int64_t transpositionHits = 0, expandedTransitions = 0, cachedParticleStates = 0;
+    std::int64_t transpositionHits = 0, treeActions = 0;
+    int maximumTreeDepth = 0, maximumTreeTurns = 0;
     double priorStrength = 0.0;
     // Policy-prior mode (enablePolicyPriors): every node is expanded when its leaf is evaluated and
     // selects by PUCT with first-play urgency. Otherwise selects by UCB1.
@@ -103,7 +105,12 @@ struct PublicBeliefCombatSearch {
     void submit(std::uint64_t request, double normalizedValue, const std::vector<double> &priors);
     void submitGuided(std::uint64_t request);
     double scorePrediction(double win, double hp, double potions, double maximumHp, double gold) const;
+    // Warm-start evidence, never old hidden transitions. Root evidence is bounded and
+    // discounted on new turns/draws so fresh simulations can correct stale estimates.
     void rebase(std::vector<BattleContext> states, std::uint64_t semanticAction, std::uint64_t seed);
+    std::vector<BattleContext> advanceParticles(std::uint64_t semanticAction,
+                                               const BattleContext &observed) const;
+    Action edgeAction(const Edge &edge, const BattleContext &state) const;
     static std::uint64_t publicObservation(const BattleContext &state);
     static std::uint64_t observationKey(const BattleContext &state);
     static std::uint64_t publicActionKey(const BattleContext &state, Action action);
@@ -118,11 +125,14 @@ private:
     std::mt19937_64 noiseRandom;
     void simulate(int particle, bool request = false, int rolloutTurns = -1, int rolloutSteps = 512);
     void addRequest(const BattleContext &state, Path &&path, Node *child);
-    static std::vector<std::uint64_t> signatureWords(const std::vector<Particle> &belief,
-                                                     std::uint64_t scope, std::uint64_t history);
-    Node &node(std::vector<Particle> belief, std::uint64_t scope, std::uint64_t history);
-    void expand(Node &parent, std::size_t edge);
-    static std::size_t particleIndex(const Node &node, int id);
+    std::vector<std::uint64_t> signatureScratch;
+    std::int64_t retentionBudget = 256;
+    void nodeWords(const BattleContext &state, std::uint64_t history);
+    std::pair<std::uint64_t, Node *> findNode(const BattleContext &state, std::uint64_t history);
+    Node &createNode(std::uint64_t key);
+    Node &node(const BattleContext &state, std::uint64_t history);
+    void expand(Node &node, const BattleContext &state);
+    static void temperEvidence(Node &node, bool informative, std::int64_t visitLimit);
     std::size_t select(const Node &node);
     std::size_t selectPuct(const Node &node, double &fpuBase) const;
     void applyRootNoise();

@@ -40,6 +40,10 @@ namespace sts {
         std::vector<CardInstance> discardPile;
         std::vector<CardInstance> exhaustPile;
 #endif
+        // Publicly known contiguous ends of the otherwise hidden ordered draw pile.
+        // Native draws pop back(); bottom is the vector prefix. Runs never overlap.
+        int knownDrawTop = 0;
+        int knownDrawBottom = 0;
         int handNormalityCount = 0;
         int handPainCount = 0;
         int strikeCount = 0;

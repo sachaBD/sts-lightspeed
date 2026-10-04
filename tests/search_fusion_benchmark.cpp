@@ -24,7 +24,18 @@ int main() {
         }
         const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         std::cout << "bounded repeat=" << repeat << " simulations=" << tree.simulations
-                  << " nodes=" << tree.nodes.size() << " seconds=" << seconds << '\n';
+                  << " nodes=" << tree.nodes.size() << " seconds=" << seconds;
+#ifdef PUBLIC_STATE_SEARCH_METRICS
+        std::size_t expanded = 0, signatureBytes = 0;
+        for (const auto &[key, node] : tree.nodes) {
+            expanded += node->expanded; signatureBytes += node->signature.size() * sizeof(std::uint64_t);
+        }
+        std::cout << " expanded_nodes=" << expanded << " signature_bytes=" << signatureBytes
+                  << " mean_tree_actions=" << static_cast<double>(tree.treeActions) / tree.simulations
+                  << " maximum_tree_depth=" << tree.maximumTreeDepth
+                  << " maximum_tree_turns=" << tree.maximumTreeTurns;
+#endif
+        std::cout << '\n';
     }
     for (int repeat = 0; repeat < 3; ++repeat) {
         search::PublicBeliefCombatSearch tree(particles, 42, 2);
@@ -33,6 +44,17 @@ int main() {
         tree.search(2000);
         const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         std::cout << "guided repeat=" << repeat << " simulations=" << tree.simulations
-                  << " nodes=" << tree.nodes.size() << " seconds=" << seconds << '\n';
+                  << " nodes=" << tree.nodes.size() << " seconds=" << seconds;
+#ifdef PUBLIC_STATE_SEARCH_METRICS
+        std::size_t expanded = 0, signatureBytes = 0;
+        for (const auto &[key, node] : tree.nodes) {
+            expanded += node->expanded; signatureBytes += node->signature.size() * sizeof(std::uint64_t);
+        }
+        std::cout << " expanded_nodes=" << expanded << " signature_bytes=" << signatureBytes
+                  << " mean_tree_actions=" << static_cast<double>(tree.treeActions) / tree.simulations
+                  << " maximum_tree_depth=" << tree.maximumTreeDepth
+                  << " maximum_tree_turns=" << tree.maximumTreeTurns;
+#endif
+        std::cout << '\n';
     }
 }

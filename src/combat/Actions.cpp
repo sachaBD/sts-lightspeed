@@ -230,6 +230,7 @@ Action Actions::ShuffleDrawPile() {
                 bc.cards.drawPile.end(),
                 java::Random(bc.shuffleRng.randomLong())
         );
+        bc.cards.knownDrawTop = bc.cards.knownDrawBottom = 0;
     }};
 }
 
@@ -1406,6 +1407,9 @@ Action Actions::ScryAction(int count) {
         const int visible = std::min(count, static_cast<int>(bc.cards.drawPile.size()));
         if (visible == 0) return;
         bc.cardSelectInfo.cardSelectTask = CardSelectTask::SCRY;
+        // Preserve the native Scry menu's exposed vector prefix after closing it.
+        bc.cards.knownDrawBottom = std::max(bc.cards.knownDrawBottom,
+            std::min(count, static_cast<int>(bc.cards.drawPile.size()) - bc.cards.knownDrawTop));
         bc.cardSelectInfo.pickCount = visible;
         bc.inputState = InputState::CARD_SELECT;
     }};

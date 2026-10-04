@@ -16,6 +16,7 @@ void CardManager::init(const sts::GameContext &gc, BattleContext &bc) {
 
 //    masterDeckSize = gc.deck.size();
     nextUniqueCardId = gc.deck.size();
+    knownDrawTop = knownDrawBottom = 0;
     handPainCount = false;
     handNormalityCount = false;
     strikeCount = 0;
@@ -98,6 +99,7 @@ void CardManager::createTempCardInDrawPile(int idx, CardInstance c) {
     notifyAddCardToCombat(c);
     notifyAddToDrawPile(c);
     drawPile.insert(drawPile.begin()+idx, c);
+    knownDrawTop = knownDrawBottom = 0;
 }
 
 void CardManager::createTempCardInDiscard(CardInstance c) {
@@ -133,12 +135,16 @@ void CardManager::createTempCardInHand(CardInstance c) {
 // **************** START Remove Methods ****************
 
 void CardManager::removeFromDrawPileAtIdx(int idx) {
+    if (idx >= static_cast<int>(drawPile.size()) - knownDrawTop) --knownDrawTop;
+    else if (idx < knownDrawBottom) --knownDrawBottom;
     notifyRemoveFromDrawPile(drawPile[idx]);
     drawPile.erase(drawPile.begin()+idx);
 }
 
 CardInstance CardManager::popFromDrawPile() {
     auto c = drawPile.back();
+    if (knownDrawTop) --knownDrawTop;
+    else if (knownDrawBottom == static_cast<int>(drawPile.size())) --knownDrawBottom;
     notifyRemoveFromDrawPile(c);
     drawPile.pop_back();
     return c;
@@ -196,7 +202,10 @@ void CardManager::insertToDrawPile(int drawPileIdx, const CardInstance &c) {
     }
 #endif
     notifyAddToDrawPile(c);
+    const auto oldSize = static_cast<int>(drawPile.size());
     drawPile.insert(drawPile.begin()+drawPileIdx, c);
+    if (drawPileIdx >= oldSize - knownDrawTop) ++knownDrawTop;
+    else if (drawPileIdx <= knownDrawBottom) ++knownDrawBottom;
 }
 
 void CardManager::moveToDrawPileTop(const CardInstance &c) {
@@ -210,6 +219,7 @@ void CardManager::moveToDrawPileTop(const CardInstance &c) {
 #endif
     notifyAddToDrawPile(c);
     drawPile.push_back(c);
+    ++knownDrawTop;
 }
 
 void CardManager::shuffleIntoDrawPile(Random &cardRandomRng, const CardInstance &c) {
@@ -218,6 +228,7 @@ void CardManager::shuffleIntoDrawPile(Random &cardRandomRng, const CardInstance 
     } else {
         int idx = cardRandomRng.random(static_cast<int>(drawPile.size()-1));
         insertToDrawPile(idx, c);
+        knownDrawTop = knownDrawBottom = 0;
     }
 }
 
@@ -248,6 +259,7 @@ void CardManager::moveDiscardPileIntoToDrawPile() {
 
     discardPileBloodCardCount = 0;
     discardPile.clear();
+    knownDrawTop = knownDrawBottom = 0;
 }
 
 // **************** END Move Methods ****************

@@ -1,7 +1,6 @@
 #include "sim/search/PublicBeliefCombatSearch.h"
 #include <algorithm>
 #include <cmath>
-#include <sstream>
 #include <stdexcept>
 
 namespace sts::search {
@@ -54,18 +53,21 @@ void PublicBeliefCombatSearch::resampleDraw(BattleContext &target,
                                            const BattleContext &observed, std::uint64_t seed) {
     auto &cards = target.cards.drawPile;
     cards = observed.cards.drawPile;
+    target.cards.knownDrawTop = observed.cards.knownDrawTop;
+    target.cards.knownDrawBottom = observed.cards.knownDrawBottom;
+    if (target.cards.knownDrawTop < 0 || target.cards.knownDrawBottom < 0
+        || target.cards.knownDrawTop + target.cards.knownDrawBottom > static_cast<int>(cards.size()))
+        throw std::logic_error("invalid draw knowledge during resampling");
     if (observed.player.hasRelic<RelicId::FROZEN_EYE>()) return;
-    auto begin = cards.begin();
-    // The native Scry menu indexes its exposed prefix. Preserve that public
-    // menu, never the rest of the hidden pile. Other card-selection screens
-    // do not make draw order public; their actions are matched by card identity.
+    auto begin = cards.begin() + target.cards.knownDrawBottom;
+    auto end = cards.end() - target.cards.knownDrawTop;
     if (observed.inputState == InputState::CARD_SELECT
-        && observed.cardSelectInfo.cardSelectTask == CardSelectTask::SCRY) {
-        begin += std::min(observed.cardSelectInfo.pickCount, static_cast<int>(cards.size()));
-    }
-    std::sort(begin, cards.end(), [](const auto &a, const auto &b) { return cardKey(a) < cardKey(b); });
+        && observed.cardSelectInfo.cardSelectTask == CardSelectTask::SCRY)
+        begin = cards.begin() + std::min(std::max(target.cards.knownDrawBottom,
+            observed.cardSelectInfo.pickCount), static_cast<int>(cards.size()) - target.cards.knownDrawTop);
+    std::sort(begin, end, [](const auto &a, const auto &b) { return cardKey(a) < cardKey(b); });
     std::default_random_engine engine(seed);
-    std::shuffle(begin, cards.end(), engine);
+    std::shuffle(begin, end, engine);
 }
 
 std::uint64_t PublicBeliefCombatSearch::publicObservation(const BattleContext &state) {
@@ -82,127 +84,95 @@ PublicBeliefCombatSearch::PublicBeliefCombatSearch(
     normalizationMaxHp = particles.front().player.maxHp;
     rollout.rolloutMode = rolloutMode;
     rollout.randGen.seed(seed);
-    std::vector<Particle> belief;
-    for (std::size_t i = 0; i < particles.size(); ++i) {
-        canonicalizeSearchState(particles[i]);
-        belief.push_back({static_cast<int>(i), particles[i]});
-    }
-    rootKey = node(std::move(belief), ROOT_KEY, ROOT_KEY).key;
+    const auto publicState = publicSearchWords(particles.front());
+    for (const auto &state : particles)
+        if (publicSearchWords(state) != publicState)
+            throw std::invalid_argument("root particles must have the same public observation");
+    rootKey = node(particles.front(), ROOT_KEY).key;
+    expand(*nodes.at(rootKey), particles.front());
 }
 
-std::vector<std::uint64_t> PublicBeliefCombatSearch::signatureWords(
-    const std::vector<Particle> &belief, std::uint64_t scope, std::uint64_t history) {
-    const bool settled = std::all_of(belief.begin(), belief.end(),
-                                    [](const Particle &p) { return isSettledSearchState(p.state); });
-    std::vector<std::uint64_t> signature{settled ? 0x5354415445ULL : 0x484953544f5259ULL, scope};
-    if (settled) {
-        signature.reserve(3 + belief.size() * 512);
-        signature.push_back(belief.size());
-        for (const auto &particle : belief) {
-            const auto words = searchStateWords(particle.state);
-            signature.push_back(particle.id); signature.push_back(words.size());
-            signature.insert(signature.end(), words.begin(), words.end());
-        }
-    } else signature.push_back(history); // Opaque pending action queues are not fused.
-    return signature;
+void PublicBeliefCombatSearch::nodeWords(
+    const BattleContext &state, std::uint64_t history) {
+    auto &signature = signatureScratch;
+    publicSearchWords(state, signature);
+    // Preserve the existing path-dependent objective's public resource counters.
+    signature.push_back(state.energyWasted); signature.push_back(state.cardsDrawn);
+    signature.push_back(isSettledSearchState(state) ? 0x5354415445ULL : 0x484953544f5259ULL);
+    if (!isSettledSearchState(state)) signature.push_back(history);
+    // A pending function queue cannot be reconstructed from visible fields alone.
+    // At settled decisions no opaque queues remain, so histories can be fused.
+}
+
+std::pair<std::uint64_t, PublicBeliefCombatSearch::Node *> PublicBeliefCombatSearch::findNode(
+    const BattleContext &state, std::uint64_t history) {
+    nodeWords(state, history);
+    const auto &signature = signatureScratch;
+    const auto key = hashSearchWords(signature);
+    if (const auto found = nodes.find(key); found != nodes.end()) {
+        if (found->second->signature != signature)
+            throw std::runtime_error("public-search node hash collision");
+        if (isSettledSearchState(state)) ++transpositionHits;
+        return {key, found->second.get()};
+    }
+    return {key, nullptr};
+}
+
+PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::createNode(std::uint64_t key) {
+    auto created = std::make_unique<Node>();
+    created->key = key; created->signature = signatureScratch;
+    const auto [found, inserted] = nodes.emplace(key, std::move(created));
+    if (!inserted) throw std::logic_error("duplicate public-search node creation");
+    return *found->second;
 }
 
 PublicBeliefCombatSearch::Node &PublicBeliefCombatSearch::node(
-    std::vector<Particle> belief, std::uint64_t scope, std::uint64_t history) {
-    if (belief.empty()) throw std::logic_error("empty public belief");
-    const auto observation = publicSearchWords(belief.front().state);
-    const auto signature = signatureWords(belief, scope, history);
-    const auto key = hashSearchWords(signature);
-    if (const auto found = nodes.find(key); found != nodes.end()) {
-        const auto &existing = *found->second;
-        if (signatureWords(existing.belief, existing.scope, existing.history) != signature)
-            throw std::runtime_error("public-belief node hash collision");
-        if (isSettledSearchState(belief.front().state)) ++transpositionHits;
-        return *found->second;
-    }
-    auto created = std::make_unique<Node>();
-    created->key = key; created->scope = scope; created->history = history;
-    created->belief = std::move(belief);
-    const auto &representative = created->belief.front().state;
-    std::vector<std::uint64_t> menu;
-    if (representative.outcome == Outcome::UNDECIDED) {
+    const BattleContext &state, std::uint64_t history) {
+    const auto [key, found] = findNode(state, history);
+    return found ? *found : createNode(key);
+}
+
+void PublicBeliefCombatSearch::expand(Node &at, const BattleContext &state) {
+    if (at.expanded) return;
+    if (state.outcome == Outcome::UNDECIDED) {
         BattleScumSearcher2::Node temporary;
-        rollout.enumerateActionsForNode(temporary, representative);
+        rollout.enumerateActionsForNode(temporary, state);
         for (const auto &edge : temporary.edges) {
-            if (!edge.action.isValidAction(representative))
-                throw std::runtime_error("native enumeration produced an illegal belief action");
-            const auto semantic = actionKey(representative, edge.action);
-            if (std::find(menu.begin(), menu.end(), semantic) == menu.end()) {
-                menu.push_back(semantic); created->edges.push_back({edge.action, semantic});
-            }
+            if (!edge.action.isValidAction(state))
+                throw std::runtime_error("native enumeration produced an illegal public action");
+            const auto semantic = actionKey(state, edge.action);
+            if (std::none_of(at.edges.begin(), at.edges.end(),
+                            [&](const Edge &e) {return e.semanticKey == semantic;}))
+                at.edges.push_back({edge.action, semantic});
         }
-        if (menu.empty()) throw std::runtime_error("empty belief-search legal menu");
+        if (at.edges.empty()) throw std::runtime_error("empty public-search legal menu");
     }
-    std::sort(menu.begin(), menu.end());
-    for (std::size_t i = 1; i < created->belief.size(); ++i) {
-        const auto &particle = created->belief[i];
-        if (publicSearchWords(particle.state) != observation)
-            throw std::runtime_error("cohort mixes distinct public observations");
-        std::vector<std::uint64_t> other;
-        if (particle.state.outcome == Outcome::UNDECIDED) {
-            BattleScumSearcher2::Node temporary;
-            rollout.enumerateActionsForNode(temporary, particle.state);
-            for (const auto &edge : temporary.edges) {
-                if (!edge.action.isValidAction(particle.state))
-                    throw std::runtime_error("illegal particle action");
-                other.push_back(actionKey(particle.state, edge.action));
-            }
-        }
-        std::sort(other.begin(), other.end());
-        other.erase(std::unique(other.begin(), other.end()), other.end());
-        if (menu != other) throw std::runtime_error("public observation aliases incompatible legal menus");
-    }
-    std::shuffle(created->edges.begin(), created->edges.end(), random);
+    std::shuffle(at.edges.begin(), at.edges.end(), random);
     if (policyPriors)
-        for (auto &edge : created->edges) edge.prior = 1.0 / created->edges.size();
-    cachedParticleStates += created->belief.size();
-    auto *result = created.get(); nodes.emplace(key, std::move(created));
-    return *result;
+        for (auto &edge : at.edges) edge.prior = 1.0 / at.edges.size();
+    at.expanded = true;
 }
 
-std::size_t PublicBeliefCombatSearch::particleIndex(const Node &at, int id) {
-    for (std::size_t i = 0; i < at.belief.size(); ++i) if (at.belief[i].id == id) return i;
-    throw std::logic_error("sampled particle missing from belief cohort");
-}
-
-void PublicBeliefCombatSearch::expand(Node &parent, std::size_t choice) {
-    auto &edge = parent.edges.at(choice);
-    if (!edge.successors.empty()) return;
-    struct Group { std::vector<Particle> belief; std::vector<std::uint64_t> observation; };
-    std::map<std::uint64_t, Group> groups;
-    std::vector<std::uint64_t> observations;
-    for (const auto &particle : parent.belief) {
-        auto state = particle.state;
-        const auto action = mapAction(parent.belief.front().state, edge.action, state);
-        action.execute(state);
-        if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
-            throw std::runtime_error("unsupported effect in public-belief transition");
-        canonicalizeSearchState(state);
-        const auto words = publicSearchWords(state);
-        const auto observation = hashSearchWords(words);
-        auto &group = groups[observation];
-        if (!group.belief.empty() && group.observation != words)
-            throw std::runtime_error("public observation hash collision");
-        if (group.belief.empty()) group.observation = words;
-        group.belief.push_back({particle.id, std::move(state)});
-        observations.push_back(observation);
+Action PublicBeliefCombatSearch::edgeAction(const Edge &edge, const BattleContext &state) const {
+    const auto type = edge.action.getActionType();
+    if (state.inputState == InputState::PLAYER_NORMAL) {
+        if (type == ActionType::CARD || type == ActionType::POTION) {
+            const auto count = type == ActionType::CARD ? state.cards.cardsInHand : state.potionCapacity;
+            const auto original = edge.action.getSourceIdx();
+            if (original < count && actionKey(state, edge.action) == edge.semanticKey
+                && edge.action.isValidAction(state)) return edge.action;
+            for (int i = 0; i < count; ++i) {
+                if (i == original) continue;
+                const Action action(type, i, edge.action.getTargetIdx());
+                if (actionKey(state, action) == edge.semanticKey && action.isValidAction(state)) return action;
+            }
+        } else if (edge.action.isValidAction(state)
+                   && actionKey(state, edge.action) == edge.semanticKey) return edge.action;
+    } else {
+        for (const auto action : Action::getAllActionsInState(state))
+            if (action.isValidAction(state) && actionKey(state, action) == edge.semanticKey) return action;
     }
-    std::map<std::uint64_t, std::uint64_t> successors;
-    for (auto &[observation, group] : groups) {
-        auto history = parent.key;
-        append(history, edge.semanticKey); append(history, observation);
-        const auto scope = group.belief.front().state.turn == parent.belief.front().state.turn
-                           ? parent.scope : history;
-        auto &child = node(std::move(group.belief), scope, history);
-        parent.children.insert(child.key); successors[observation] = child.key;
-    }
-    for (const auto observation : observations) edge.successors.push_back(successors.at(observation));
-    ++expandedTransitions;
+    throw std::runtime_error("shared public edge has no legal semantic action");
 }
 
 std::size_t PublicBeliefCombatSearch::select(const Node &current) {
@@ -265,39 +235,82 @@ void PublicBeliefCombatSearch::addRequest(const BattleContext &state, Path &&pat
         slot = &pending.insert(pending.end(), std::move(handle))->second;
     }
     slot->state = state; slot->path = std::move(path); slot->child = child;
+    if (child) child->evaluationPending = true;
 }
 
 void PublicBeliefCombatSearch::simulate(int particle, bool request, int rolloutTurns, int rolloutSteps) {
+    BattleContext current = particles.at(particle);
+    // Root particles carry public knowledge/latent state, not eight reusable future
+    // worlds. Independent unknown futures avoid mistaking repeated determinization
+    // for deep-search confidence. Preserve the single-particle deterministic API.
+    if (particles.size() > 1) {
+        const auto seed = (static_cast<std::uint64_t>(random()) << 32) | random();
+        current.aiRng = Random(seed + 1); current.cardRandomRng = Random(seed + 2);
+        current.miscRng = Random(seed + 3); current.monsterHpRng = Random(seed + 4);
+        current.potionRng = Random(seed + 5); current.shuffleRng = Random(seed + 6);
+        if (!current.player.hasRelic<RelicId::FROZEN_EYE>()) {
+            auto &cards = current.cards.drawPile;
+            auto first = cards.begin() + current.cards.knownDrawBottom;
+            auto last = cards.end() - current.cards.knownDrawTop;
+            if (current.inputState == InputState::CARD_SELECT
+                && current.cardSelectInfo.cardSelectTask == CardSelectTask::SCRY)
+                first = cards.begin() + std::min(std::max(current.cards.knownDrawBottom,
+                    current.cardSelectInfo.pickCount), static_cast<int>(cards.size()) - current.cards.knownDrawTop);
+            std::default_random_engine world(seed);
+            std::shuffle(first, last, world);
+        }
+    }
     auto *at = nodes.at(rootKey).get();
     Path path;
     if (policyPriors && !rootRequested) {
         rootRequested = true;
-        addRequest(at->belief.at(particleIndex(*at, particle)).state, std::move(path), at);
+        addRequest(current, std::move(path), at);
         return;
     }
     Node *leaf = nullptr;
     double fpuBase = 0;
-    BattleContext current = at->belief.at(particleIndex(*at, particle)).state;
     for (int depth = 0; depth < maximumActions && current.outcome == Outcome::UNDECIDED; ++depth) {
         if (std::any_of(path.begin(), path.end(), [&](const auto &p) { return p.first == at; }))
-            throw std::runtime_error("cycle in within-turn public-belief DAG");
+            throw std::runtime_error("cycle in public-search DAG");
+        expand(*at, current);
         const auto choice = policyPriors ? selectPuct(*at, fpuBase) : select(*at);
-        const bool unvisited = at->edges[choice].visits + at->edges[choice].inFlight == 0;
-        ++at->inFlight; ++at->edges[choice].inFlight;
+        auto &edge = at->edges[choice];
+        const bool unvisited = edge.visits + edge.inFlight == 0;
+        const auto action = edgeAction(edge, current);
+        ++at->inFlight; ++edge.inFlight;
         path.emplace_back(at, choice);
-        // UCB's first visit evaluates a sampled continuation, not a new policy node.
-        // Build the full conditioned cohort only when tree traversal needs that child.
+        action.execute(current);
+        if (current.unsupportedEffectKind != UnsupportedEffectKind::NONE)
+            throw std::runtime_error("unsupported effect in public-search transition");
+        maximumTreeTurns = std::max(maximumTreeTurns, current.turn - particles.front().turn);
+        if (current.outcome != Outcome::UNDECIDED) break;
+        auto history = at->key;
+        if (!isSettledSearchState(current)) {
+            append(history, edge.semanticKey); append(history, observationKey(current));
+        }
+        const auto [key, existing] = findNode(current, history);
+        if (edge.lastChildKey != key) {
+            edge.children.insert(key);
+            edge.lastChildKey = key;
+        }
+        // Keep the transition identity even when the rollout leaf is not stored:
+        // another route may search that state later, making its evidence reachable
+        // on rebase. Do not allocate a zero-evidence node just to remember the link.
         if (unvisited && !policyPriors) {
-            mapAction(at->belief.front().state, at->edges[choice].action, current).execute(current);
-            canonicalizeSearchState(current);
             boundedRollout(current, request ? rolloutTurns : -1, request ? rolloutSteps : maximumActions);
             break;
         }
-        const auto index = particleIndex(*at, particle);
-        expand(*at, choice);
-        at = nodes.at(at->edges[choice].successors.at(index)).get();
-        current = at->belief.at(particleIndex(*at, particle)).state;
+        at = existing ? existing : &createNode(key);
         if (policyPriors && current.outcome == Outcome::UNDECIDED && !at->evaluated) {
+            if (at->evaluationPending) {
+                // Another path already requested this same public leaf. Avoid duplicate
+                // inference; release virtual loss and let the rest of the batch proceed.
+                for (const auto &[parent, index] : path) {
+                    --parent->inFlight; --parent->edges[index].inFlight;
+                }
+                return;
+            }
+            expand(*at, current);
             leaf = at;
             break;
         }
@@ -339,6 +352,8 @@ void PublicBeliefCombatSearch::backup(Path &path, double value, const BattleCont
             }
         }
     }
+    treeActions += path.size();
+    maximumTreeDepth = std::max(maximumTreeDepth, static_cast<int>(path.size()));
     ++simulations;
     if (resolved) ++terminalEvaluations;
     else if (terminal) ++unresolvedEvaluations;
@@ -352,7 +367,6 @@ void PublicBeliefCombatSearch::boundedRollout(BattleContext &state, int turns, i
         if (turns >= 0 && state.turn - startTurn >= turns) break;
         // Same move and draws as enumerate + selectRolloutAction; enumerates only when needed.
         rollout.rolloutAction(temporary, state).execute(state);
-        canonicalizeSearchState(state);
     }
     // An unfinished rollout is unresolved evidence, never a victory.
 }
@@ -379,7 +393,7 @@ Action PublicBeliefCombatSearch::selectedAction() const {
         return a.valueSum < b.valueSum;
     });
     if (best == edges.end() || best->visits == 0) throw std::runtime_error("empty belief search");
-    return best->action;
+    return edgeAction(*best, particles.front());
 }
 
 void PublicBeliefCombatSearch::setRootPrior(const std::vector<double> &priors, double strength) {
@@ -470,6 +484,7 @@ void PublicBeliefCombatSearch::submit(std::uint64_t id, double value, const std:
     if (found == pending.end() || !std::isfinite(value) || value < -.1 || value > 2)
         throw std::invalid_argument("invalid unified leaf submission");
     auto *child = found->second.child;
+    if (child) child->evaluationPending = false;
     if (!priors.empty() && !child) throw std::invalid_argument("priors for a request without a leaf node");
     if (child && !child->evaluated) {  // first evaluation of a node wins
         if (!priors.empty()) assignPriors(child->edges, priors);
@@ -488,6 +503,7 @@ void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
     if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
         throw std::runtime_error("unsupported effect in guided leaf");
     const auto value = terminalValue(state);
+    if (found->second.child) found->second.child->evaluationPending = false;
     if (auto *child = found->second.child; child && !child->evaluated) {  // keeps uniform priors
         child->evaluated = true; child->value = value;
         if (child == nodes.at(rootKey).get()) applyRootNoise();
@@ -496,45 +512,84 @@ void PublicBeliefCombatSearch::submitGuided(std::uint64_t id) {
     spareRequests.push_back(pending.extract(found));
 }
 
+void PublicBeliefCombatSearch::temperEvidence(Node &at, bool informative, std::int64_t visitLimit) {
+    // Evidence is a warm start, not a promise about an unchanged hidden posterior.
+    // Bound inertia by the previous root's actual compute; new information halves it.
+    const double factor = std::min(1.0, static_cast<double>(visitLimit) / std::max<std::int64_t>(1, at.visits))
+                          * (informative ? 0.5 : 1.0);
+    at.visits = 0;
+    for (auto &edge : at.edges) {
+        const auto oldVisits = edge.visits;
+        edge.visits = static_cast<std::int64_t>(oldVisits * factor);
+        const double weight = oldVisits ? static_cast<double>(edge.visits) / oldVisits : 0.;
+        edge.valueSum *= weight;
+        const auto oldMeasured = edge.measured;
+        edge.measured = static_cast<std::int64_t>(oldMeasured * weight);
+        edge.wins = std::min(edge.measured, static_cast<std::int64_t>(edge.wins * weight));
+        const double outcomeWeight = oldMeasured ? static_cast<double>(edge.measured) / oldMeasured : 0.;
+        for (auto &value : edge.outcomeSum) value *= outcomeWeight;
+        if (!edge.visits) edge.best = -std::numeric_limits<double>::infinity();
+        at.visits += edge.visits;
+    }
+}
+
+std::vector<BattleContext> PublicBeliefCombatSearch::advanceParticles(
+    std::uint64_t semantic, const BattleContext &observed) const {
+    const auto &edges = root().edges;
+    const auto chosen = std::find_if(edges.begin(), edges.end(), [&](const Edge &e) {return e.semanticKey == semantic;});
+    if (chosen == edges.end()) throw std::invalid_argument("committed action is not in the public root");
+    const auto observation = publicSearchWords(observed);
+    std::vector<BattleContext> survivors;
+    for (auto state : particles) {
+        edgeAction(*chosen, state).execute(state);
+        if (state.unsupportedEffectKind != UnsupportedEffectKind::NONE)
+            throw std::runtime_error("unsupported effect while advancing public particles");
+        if (publicSearchWords(state) == observation) survivors.push_back(std::move(state));
+    }
+    return survivors;
+}
+
 void PublicBeliefCombatSearch::rebase(std::vector<BattleContext> states, std::uint64_t action, std::uint64_t seed) {
     if (states.empty() || !pending.empty()) throw std::invalid_argument("cannot rebase empty/pending search");
     if (std::none_of(root().edges.begin(), root().edges.end(), [&](const Edge &e) {return e.semanticKey == action;}))
         throw std::invalid_argument("rebase action was not legal at previous public root");
+    const bool informative = states.front().turn != particles.front().turn
+                             || states.front().cardsDrawn != particles.front().cardsDrawn;
     auto history = rootKey;
     append(history, action); append(history, observationKey(states.front()));
-    const auto scope = states.front().turn == particles.front().turn ? root().scope : history;
     particles = std::move(states);
+    const auto publicState = publicSearchWords(particles.front());
+    for (const auto &state : particles)
+        if (publicSearchWords(state) != publicState)
+            throw std::invalid_argument("rebased particles disagree on the public observation");
     random.seed(seed); rollout.randGen.seed(seed);
-    std::vector<Particle> belief;
-    for (std::size_t i = 0; i < particles.size(); ++i) {
-        canonicalizeSearchState(particles[i]);
-        belief.push_back({static_cast<int>(i), particles[i]});
-    }
-    // Pending function queues cannot be structurally compared across a fresh root belief.
-    if (!std::all_of(belief.begin(), belief.end(), [](const Particle &p) {return isSettledSearchState(p.state);})) {
-        nodes.clear(); cachedParticleStates = 0;
-    }
-    rootKey = node(std::move(belief), scope, history).key;
+    rootKey = node(particles.front(), history).key;
+    expand(*nodes.at(rootKey), particles.front());
+    // Preserve up to one previous root's compute, with an ordinary-budget floor.
+    // A fixed 256 cap would erase almost all confidence from deep boss searches.
+    if (simulations > 0) retentionBudget = std::max<std::int64_t>(256, simulations);
+    const auto visitLimit = retentionBudget;
     std::unordered_set<std::uint64_t> keep;
     std::vector<std::uint64_t> todo{rootKey};
     while (!todo.empty()) {
-        auto key = todo.back(); todo.pop_back();
-        auto found = nodes.find(key);
-        if (found == nodes.end() || !keep.insert(key).second) continue;
-        for (auto child : found->second->children) todo.push_back(child);
+        const auto key = todo.back(); todo.pop_back();
+        if (!keep.insert(key).second) continue;
+        const auto found = nodes.find(key);
+        if (found == nodes.end()) continue; // identified but never searched rollout leaf
+        for (const auto &edge : found->second->edges)
+            for (const auto child : edge.children) todo.push_back(child);
     }
     for (auto it = nodes.begin(); it != nodes.end();) {
-        if (!keep.count(it->first)) {
-            cachedParticleStates -= it->second->belief.size();
-            it = nodes.erase(it);
-        } else ++it;
+        if (!keep.count(it->first)) it = nodes.erase(it);
+        else { temperEvidence(*it->second, informative, visitLimit); ++it; }
     }
     retainedNodes = nodes.size(); retainedVisits = root().visits;
-    if (policyPriors) {  // a retained root keeps its priors; a new one is requested first
+    if (policyPriors) {
         rootRequested = root().evaluated; rootNoised = false;
         noiseRandom.seed(seed ^ 0x6e6f697365ULL);
         applyRootNoise();
     }
-    simulations = terminalEvaluations = unresolvedEvaluations = neuralEvaluations = 0;
+    simulations = terminalEvaluations = unresolvedEvaluations = neuralEvaluations = treeActions = 0;
+    maximumTreeDepth = maximumTreeTurns = 0;
 }
 }

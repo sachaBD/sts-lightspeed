@@ -7,19 +7,15 @@
 
 namespace sts::search {
 
-// Canonical internal representation at settled player decisions. Pending card-selection
-// queues retain their original indexing. Draw order is never changed.
-void canonicalizeSearchState(BattleContext &state);
+// Whitelisted enemy memory derived from visible intents/actions, not hidden AI data.
+std::uint64_t publicMonsterHistory(const Monster &monster);
+
+// Ordered vectors remain in the simulator; search identity uses multisets.
 bool isSettledSearchState(const BattleContext &state);
-
-// Public projection only, NOT a sufficient belief/transposition key.
+// Practical public decision-state abstraction, not a complete hidden belief.
 std::vector<std::uint64_t> publicSearchWords(const BattleContext &state);
+void publicSearchWords(const BattleContext &state, std::vector<std::uint64_t> &out);
 std::uint64_t public_search_key(const BattleContext &state);
-
-// Complete future-relevant state at canonical, settled decisions, including hidden state and RNGs.
-// Never use this per-particle fingerprint to select a public policy. Fusion compares
-// entire observation-conditioned particle cohorts (including multiplicities).
-std::vector<std::uint64_t> searchStateWords(const BattleContext &state);
 std::uint64_t hashSearchWords(const std::vector<std::uint64_t> &words);
 std::uint64_t semantic_action_key(const BattleContext &state, Action action);
 Action mapSemanticAction(const BattleContext &source, Action action, const BattleContext &target);
