@@ -27,7 +27,9 @@ The C++ simulator in this repo is the trusted reference.
    - The observation says which card each slot holds, so slot order carries no meaning and a model
      generalises across decks.
    - Drawing samples from the draw counts. That is equivalent to a uniformly shuffled pile, so the draw
-     order is not hidden state.
+     order is not hidden state. A draw of k cards is one vectorised sample (each copy gets a random key, the
+     k smallest are drawn; discard copies rank after draw-pile copies, which is the reshuffle), not a loop.
+     On-draw triggers (Evolve, Fire Breathing) are computed from what was drawn, with up to two Evolve rounds.
    - Up to K_TOP=2 known top cards cover put-on-top effects.
    - Created cards reuse a slot with the same identity, or take a free one. If none is free,
      ERR_SLOT_OVERFLOW is set.

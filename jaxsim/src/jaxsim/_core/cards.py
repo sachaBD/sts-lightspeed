@@ -177,23 +177,24 @@ def play_post(spec: api.EnvSpec, s: State, d, jugg):
                    .astype(I16))
     # created cards: draw pile (shuffled in), discard pile, or hand (overflowing to discard at 10)
     card, pile, n = r[C("create_card")], r[C("create_pile")], r[C("create_n")]
-    s2, slot, ok = piles.find_or_alloc(s, card, 0, TABLE[card, 0, C("cost")], 0)
-    p = s2.piles.astype(I32)
+    want = (card > 0) & live
+    s, slot, ok = piles.find_or_alloc(s, card, 0, TABLE[card, 0, C("cost")], 0, want)
+    n = jnp.where(want & ok, n, 0)
+    p = s.piles.astype(I32)
     room = jnp.maximum(spec.H - p[api.PILE_HAND].sum(), 0)
     to_hand = jnp.where(pile == tc.TO_HAND, jnp.minimum(n, room), 0)
     to_discard = jnp.where(pile == tc.TO_DISCARD, n, 0) + jnp.where(pile == tc.TO_HAND, n - to_hand, 0)
     to_draw = jnp.where(pile == tc.TO_DRAW, n, 0)
     p = (p.at[api.PILE_HAND, slot].add(to_hand).at[api.PILE_DISCARD, slot].add(to_discard)
           .at[api.PILE_DRAW, slot].add(to_draw))
-    s = tree_where((card > 0) & live & ok, s2._replace(piles=p.astype(I16)), s)
+    s = s._replace(piles=p.astype(I16))
     # the played card leaves: powers vanish, exhausting cards (and skills under Corruption) go to exhaust with
     # their triggers, the rest to discard. After a win it still leaves; after the player dies it stays in limbo.
     exhausts = (r[C("exhausts")] == 1) | ((s.p_corruption > 0) & (r[C("type")] == tc.SKILL))
     leaves = (r[C("type")] != tc.POWER) & (s.hp > 0)
     rampage = r[C("special")] == tc.SP_RAMPAGE   # leaves with its bonus raised: a new identity
-    s2, slot2, ok2 = piles.find_or_alloc(s, s.slot_card[d], s.slot_up[d], s.slot_cost[d],
-                                         s.slot_misc[d] + r[C("special_amt")])
-    s = tree_where(rampage & ok2, s2, s)
+    s, slot2, ok2 = piles.find_or_alloc(s, s.slot_card[d], s.slot_up[d], s.slot_cost[d],
+                                        s.slot_misc[d] + r[C("special_amt")], rampage)
     leave = jnp.where(rampage & ok2, slot2, d)
     p = s.piles.astype(I32)
     p = p.at[jnp.where(exhausts, api.PILE_EXHAUST, api.PILE_DISCARD), leave].add(leaves.astype(I32))
