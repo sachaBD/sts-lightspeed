@@ -10,7 +10,7 @@ from jaxsim._core.tables import ids
 
 ATTACK, SKILL, POWER, STATUS, CURSE = range(5)
 
-COLUMNS = ("supported", "cost", "type", "playable", "ethereal", "exhausts", "damage", "hits", "block", "block_twice",
+COLUMNS = ("supported", "cost", "type", "playable", "ethereal", "exhausts", "damage", "hits", "block",
            "e_vuln", "e_weak", "p_str", "draw", "copy_to_discard", "add_draw_card")
 _COL = {c: i for i, c in enumerate(COLUMNS)}
 
@@ -25,8 +25,7 @@ _ROWS = {
     "SHRUG_IT_OFF":   (dict(cost=1, type=SKILL, block=8, draw=1), dict(block=11)),
     "INFLAME":        (dict(cost=1, type=POWER, p_str=2), dict(p_str=3)),
     "TWIN_STRIKE":    (dict(cost=1, type=ATTACK, damage=5, hits=2), dict(damage=7)),
-    # C++ quirk (BattleContext.cpp IRON_WAVE): block goes through calculateCardBlock twice.
-    "IRON_WAVE":      (dict(cost=1, type=ATTACK, damage=5, block=5, block_twice=1), dict(damage=7, block=7)),
+    "IRON_WAVE":      (dict(cost=1, type=ATTACK, damage=5, block=5), dict(damage=7, block=7)),
     "ANGER":          (dict(cost=0, type=ATTACK, damage=6, copy_to_discard=1), dict(damage=8)),
     "WILD_STRIKE":    (dict(cost=1, type=ATTACK, damage=12, add_draw_card=_ID["WOUND"]), dict(damage=17)),
     "WOUND":          (dict(cost=-1, type=STATUS, playable=0), {}),

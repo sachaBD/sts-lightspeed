@@ -91,7 +91,6 @@ the legal-action set.
 - Coverage: `uv run python -m tests.oracle.coverage`.
 
 C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
-- Iron Wave's block goes through `calculateCardBlock` twice, so Dexterity and Frail apply twice.
 - A monster's debuff on the player is "just applied" (skips that round's decrement) only if the player didn't
   already have it.
 - When a card wins the fight, its later effects are skipped (Bash's Vulnerable, Anger's copy, draws), but the
