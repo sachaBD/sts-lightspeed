@@ -9,7 +9,9 @@ from jaxsim._core.state import I16, I32, U32, State
 def find_or_alloc(s: State, card, up, cost, misc):
     """Slot holding this identity, else the first empty slot. Sets ERR_SLOT_OVERFLOW if neither exists."""
     match = (s.slot_card == card) & (s.slot_up == up) & (s.slot_cost == cost) & (s.slot_misc == misc)
-    empty = s.slot_card == 0
+    unused = jnp.all(s.piles == 0, axis=0) & ~jnp.any(s.known_top[:, None] == jnp.arange(s.slot_card.shape[0]), 0)
+    # never-used slots first (deterministic for the parity harness), then slots with no copies left
+    empty = jnp.where(jnp.any(s.slot_card == 0), s.slot_card == 0, unused)
     have = jnp.any(match)
     ok = have | jnp.any(empty)
     slot = jnp.where(have, jnp.argmax(match), jnp.argmax(empty))

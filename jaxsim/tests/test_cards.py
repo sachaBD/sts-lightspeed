@@ -97,3 +97,59 @@ def test_battle_trance_blocks_further_draws_this_turn():
     assert int(env.observe(s).piles[api.PILE_HAND].sum()) == 1 + 3
     s = env.step(s, jnp.int32(ps), jax.random.key(2))
     assert int(env.observe(s).piles[api.PILE_HAND].sum()) == 3   # Pommel drew nothing
+
+
+def test_heavy_blade_applies_strength_three_times():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["HEAVY_BLADE"], p_str=4, energy=3), "HEAVY_BLADE")
+    assert int(env.observe(s).enemy[0]) == 440 - (14 + 3 * 4)
+
+
+def test_perfected_strike_counts_strikes_outside_exhaust_including_itself():
+    env = jaxsim.make_env()
+    s = _hand_of(env, ["PERFECTED_STRIKE", "STRIKE_RED", "TWIN_STRIKE", "DEFEND_RED"], energy=3)
+    p = s.piles.at[api.PILE_DISCARD, _slot(s, "STRIKE_RED")].set(2).at[api.PILE_EXHAUST, _slot(s, "TWIN_STRIKE")].set(5)
+    s = _play(env, s._replace(piles=p), "PERFECTED_STRIKE")
+    assert int(env.observe(s).enemy[0]) == 440 - (6 + 2 * 5)   # itself + Strike + Twin Strike in hand + 2 discarded
+
+
+def test_whirlwind_spends_all_energy_and_hits_x_times():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["WHIRLWIND"], energy=3), "WHIRLWIND")
+    assert int(env.observe(s).enemy[0]) == 440 - 15 and int(env.observe(s).player[3]) == 0
+    s = _hand_of(env, ["WHIRLWIND"], energy=0)
+    assert bool(env.legal_mask(s)[_slot(s, "WHIRLWIND")])
+    s = _play(env, s, "WHIRLWIND")
+    assert int(env.observe(s).enemy[0]) == 440
+
+
+def test_rampage_grows_per_copy():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["RAMPAGE"], energy=3), "RAMPAGE")
+    o = env.observe(s)
+    moved = int(np.flatnonzero(np.asarray(o.piles[api.PILE_DISCARD]))[0])
+    assert int(o.slot_card[moved]) == jaxsim.CARD_NAMES.index("RAMPAGE") and int(o.slot_misc[moved]) == 5
+    assert int(o.enemy[0]) == 440 - 8
+
+
+def test_blood_for_blood_cheaper_per_hp_losing_hit():
+    env = jaxsim.make_env()
+    from jaxsim._core import champ
+    s = _hand_of(env, ["BLOOD_FOR_BLOOD", "STRIKE_RED"], block=5)._replace(e_move=I16(champ.EXECUTE))
+    b = _slot(s, "BLOOD_FOR_BLOOD")
+    s = env.step(s, jnp.int32(env.spec.END_TURN), jax.random.key(1))
+    assert int(env.observe(s).slot_cost[b]) == 4 - 2    # Execute 10 x 2 through 5 block: both hits lose hp
+
+
+def test_second_wind_exhausts_sentinel_for_energy():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["SECOND_WIND", "SENTINEL", "DEFEND_RED", "STRIKE_RED"], energy=3), "SECOND_WIND")
+    o = env.observe(s)
+    assert int(o.player[2]) == 2 * 5 and int(o.player[3]) == 3 - 1 + 2
+    assert int(o.piles[api.PILE_HAND].sum()) == 1
+
+
+def test_sever_soul_kill_leaves_non_attacks_in_hand():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["SEVER_SOUL", "DEFEND_RED"], e_hp=5, energy=3), "SEVER_SOUL")
+    assert env.outcome(s).won and int(env.observe(s).piles[api.PILE_HAND, _slot(s, "DEFEND_RED")]) == 1

@@ -99,11 +99,19 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
 - After a winning hit, block, HP loss, healing and the played card leaving still happen; other effects don't
   (C++ `clearOnCombatVictory`). If the player dies from their own card (Offering), the card stays in limbo.
 - No Draw stacks (two Battle Trances give No Draw 2). Ascender's Bane has cost −3.
+- Sever Soul attacks before exhausting (its exhausts are queued behind the attack), so a killing Sever Soul
+  exhausts nothing. Fiend Fire and Second Wind exhaust first.
+- Blood for Blood gets 1 cheaper per hp-loss event: each Champ hit that gets through block, each Burn, each
+  self-damage card. Perfected Strike counts Strike cards in hand, draw and discard plus itself, not exhaust.
+- Card identity includes cost (Blood for Blood) and misc (Rampage's bonus). A played Rampage leaves to a new
+  identity with its bonus raised. Slots whose copies are all gone are reused once no never-used slot is left.
 
 ## Supported content
 
 - **Cards** (`jaxsim.supported_cards()`), upgraded and unupgraded:
-  - starter cards, PR #2's set, and batch 1 of #5 (table rows and small columns);
+  - starter cards, PR #2's set, batch 1 of #5 (table rows and small columns) and batch 2 (formulas:
+    Heavy Blade, Perfected Strike, Body Slam, Whirlwind, Searing Blow, Rampage, Blood for Blood, Sever Soul,
+    Second Wind, Fiend Fire);
   - the statuses those cards create: Wound, Dazed, Burn;
   - Ascender's Bane.
 - No relic effects and no potions yet. Relics are carried in the observation only.

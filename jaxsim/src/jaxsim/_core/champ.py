@@ -74,9 +74,14 @@ def take_turn(s: State, r) -> State:
     s = s._replace(e_block=I16(0))
     base = jnp.select([m == HEAVY_SLASH, m == FACE_SLAP, m == EXECUTE], [HEAVY_SLASH_DMG, FACE_SLAP_DMG, EXECUTE_DMG], 0)
     hits = jnp.select([m == EXECUTE, base > 0], [EXECUTE_HITS, 1], 0)
-    total = monster_damage(s, base) * hits
+    per = monster_damage(s, base)
+    total = per * hits
     blocked = jnp.minimum(s.block.astype(I32), total)
     hp = s.hp - (total - blocked)
+    # hp-loss events (Blood for Blood): hits landing after the block is used up
+    events = jnp.where(per > 0, jnp.maximum(hits - s.block.astype(I32) // jnp.maximum(per, 1), 0), 0)
+    from jaxsim._core import cards
+    s = cards.blood_events(s, jnp.where(total > blocked, events, 0))
     died = hp <= 0
     s = s._replace(block=i16(s.block - blocked), hp=i16(jnp.maximum(hp, 0)), done=s.done | died)
     at_death = s  # the C++ stops the moment the player dies: no debuffs, no roll
