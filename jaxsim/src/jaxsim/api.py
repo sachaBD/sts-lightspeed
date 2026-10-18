@@ -165,7 +165,7 @@ class Obs(NamedTuple):
     slot_misc: jax.Array       # [D] per-card value (Rampage / Ritual Dagger / Genetic Algorithm ...)
     piles: jax.Array           # [NUM_PILES, D] counts, rows PILE_*
     known_top: jax.Array       # [K_TOP] slot ids on top of the draw pile, top first; -1 = unknown
-    player: jax.Array          # [4] hp, max_hp, block, energy
+    player: jax.Array          # [5] hp, max_hp, block, energy, energy per turn (Berserk raises it)
     player_status: jax.Array   # [n_player_status] amount per status id
     enemy: jax.Array           # [6] hp, max_hp, block, intent move id, previous move id, AI state
                                #     (Champ AI state: defensive stances used + 4 * phase 2)

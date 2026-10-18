@@ -31,7 +31,8 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
         piles=z(api.NUM_PILES, spec.D).at[api.PILE_DRAW].set(count.astype(I16)),
         known_top=jnp.full((spec.K_TOP,), -1, I16),
         hp=start.hp.astype(I16), max_hp=start.max_hp.astype(I16), block=I16(0), energy=I16(3),
-        p_str=I16(0), p_dex=I16(0), p_vuln=I16(0), p_weak=I16(0), p_frail=I16(0), p_ja=I16(0), p_lose_str=I16(0), p_no_draw=I16(0),
+        p_str=I16(0), p_dex=I16(0), p_vuln=I16(0), p_weak=I16(0), p_frail=I16(0), p_ja=I16(0), p_lose_str=I16(0), p_no_draw=I16(0), p_energy_per_turn=I16(3),
+        p_metallicize=I16(0), p_demon_form=I16(0), p_barricade=I16(0), p_brutality=I16(0), p_combust=I16(0), p_combust_hp=I16(0), p_corruption=I16(0), p_dark_embrace=I16(0), p_evolve=I16(0), p_fnp=I16(0), p_fire_breathing=I16(0), p_juggernaut=I16(0), p_rage=I16(0), p_rupture=I16(0), p_flame_barrier=I16(0),
         relics=start.relics.astype(I16), relic_ctr=z(spec.R), potions=start.potions.astype(I16),
         potion_n=start.potion_count.astype(I16), potion_cap=start.potion_capacity.astype(I16),
         e_hp=I16(champ.HP), e_max_hp=I16(champ.HP), e_block=I16(0), e_str=I16(0), e_vuln=I16(0), e_weak=I16(0),
@@ -42,5 +43,9 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
     k_draw, k_roll = jax.random.split(key)
     roll = jax.random.randint(k_roll, (), 0, 100) if forced is None else forced.roll
     s = champ.roll(s, roll)
-    s, _ = piles.draw(spec, s, jnp.where(bad, 0, 5), k_draw, forced, 5)
+    # innate cards start on top of the draw pile: all of them are drawn, then the rest of the 5
+    innate = jnp.where(rows[:, tc.col("innate")] == 1, count, 0)
+    innate = jnp.minimum(innate, jnp.maximum(spec.H - jnp.cumsum(innate) + innate, 0)).astype(I16)
+    s = s._replace(piles=s.piles.at[api.PILE_DRAW].add(-innate).at[api.PILE_HAND].add(innate))
+    s, _, _ = piles.draw(spec, s, jnp.where(bad, 0, jnp.maximum(5 - innate.sum(), 0)), k_draw, forced, 5, extend=False)
     return s

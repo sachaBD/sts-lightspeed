@@ -82,7 +82,8 @@ bench/bench_step.py      random-policy throughput
 
 `tests/test_parity.py` plays 200 random-deck fights against the C++ simulator (the `jaxsim_oracle` process,
 built by `tools/build_oracle.sh`) and compares every step: piles, player, enemy, statuses, turn, outcome and
-the legal-action set.
+the legal-action set. Once the fight is over only the result is compared (done, won, hp, max hp): effects still
+queued after the end (e.g. a Dark Embrace draw after the killing blow) are not modelled.
 - The C++'s random outcomes are injected into JAX through the private forced path (`_core/rand.py`):
   - drawn cards: the hand difference before and after;
   - Champ rolls: replayed from a copy of `aiRng`.
@@ -103,6 +104,16 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
   exhausts nothing. Fiend Fire and Second Wind exhaust first.
 - Blood for Blood gets 1 cheaper per hp-loss event: each Champ hit that gets through block, each Burn, each
   self-damage card. Perfected Strike counts Strike cards in hand, draw and discard plus itself, not exhaust.
+- Step order follows the C++ action queue (see `_core/step.py`):
+  - playing a card: its effects, its own draws, the card leaving (exhaust triggers), Juggernaut, then triggered
+    draws (Dark Embrace, Evolve);
+  - END_TURN: Metallicize, Burn, Combust, end-of-turn powers, ethereal exhaust (Feel No Pain, Dark Embrace),
+    discard, Dark Embrace draws, the Champ's turn hit by hit (Flame Barrier hits back after each), end of
+    round, next turn start (Barricade, draw 5, Brutality, Demon Form, energy).
+  - Evolve draws triggered by an end-of-turn Dark Embrace draw happen after the Champ's turn (the C++ queues
+    them behind the monster turn start); only Fire Breathing timing on such a draw could differ.
+- The first Corruption sets every skill's cost to 0 for the combat (CardManager::onBuffCorruption); later
+  skills are free while it is active. Berserk raises energy per turn (no status in the C++): Obs.player[4].
 - Card identity includes cost (Blood for Blood) and misc (Rampage's bonus). A played Rampage leaves to a new
   identity with its bonus raised. Slots whose copies are all gone are reused once no never-used slot is left.
 
@@ -111,7 +122,9 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
 - **Cards** (`jaxsim.supported_cards()`), upgraded and unupgraded:
   - starter cards, PR #2's set, batch 1 of #5 (table rows and small columns) and batch 2 (formulas:
     Heavy Blade, Perfected Strike, Body Slam, Whirlwind, Searing Blow, Rampage, Blood for Blood, Sever Soul,
-    Second Wind, Fiend Fire);
+    Second Wind, Fiend Fire) and batch 3 (powers and hooks: Metallicize, Demon Form, Barricade, Berserk,
+    Brutality, Combust, Corruption, Dark Embrace, Evolve, Feel No Pain, Fire Breathing, Juggernaut, Rupture,
+    Rage, Flame Barrier);
   - the statuses those cards create: Wound, Dazed, Burn;
   - Ascender's Bane.
 - No relic effects and no potions yet. Relics are carried in the observation only.

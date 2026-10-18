@@ -38,7 +38,7 @@ def test_shapes_and_dtypes(env, start, key):
     o, out, m = env.observe(s), env.outcome(s), env.legal_mask(s)
     assert m.shape == (sp.A,) and m.dtype == jnp.bool_
     expect = dict(slot_card=(sp.D,), slot_upgraded=(sp.D,), slot_cost=(sp.D,), slot_misc=(sp.D,),
-                  piles=(api.NUM_PILES, sp.D), known_top=(sp.K_TOP,), player=(4,),
+                  piles=(api.NUM_PILES, sp.D), known_top=(sp.K_TOP,), player=(5,),
                   player_status=(sp.n_player_status,), enemy=(6,), enemy_status=(sp.n_monster_status,),
                   relics=(sp.R,), relic_counters=(sp.R,), potions=(sp.P,), potion_counts=(sp.P,), potion_capacity=(), choice=(sp.CHOICE,), turn=())
     assert set(expect) == set(o._fields)

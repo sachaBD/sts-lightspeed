@@ -12,7 +12,12 @@ def observe(spec: api.EnvSpec, s: State) -> api.Obs:
     ps = jnp.zeros((spec.n_player_status,), I16)
     for name, v in (("STRENGTH", s.p_str), ("DEXTERITY", s.p_dex), ("VULNERABLE", s.p_vuln),
                     ("WEAK", s.p_weak), ("FRAIL", s.p_frail), ("LOSE_STRENGTH", s.p_lose_str),
-                    ("NO_DRAW", s.p_no_draw)):
+                    ("NO_DRAW", s.p_no_draw), ("METALLICIZE", s.p_metallicize), ("DEMON_FORM", s.p_demon_form),
+                    ("BARRICADE", s.p_barricade), ("BRUTALITY", s.p_brutality), ("COMBUST", s.p_combust),
+                    ("CORRUPTION", s.p_corruption), ("DARK_EMBRACE", s.p_dark_embrace), ("EVOLVE", s.p_evolve),
+                    ("FEEL_NO_PAIN", s.p_fnp), ("FIRE_BREATHING", s.p_fire_breathing),
+                    ("JUGGERNAUT", s.p_juggernaut), ("RAGE", s.p_rage), ("RUPTURE", s.p_rupture),
+                    ("FLAME_BARRIER", s.p_flame_barrier)):
         ps = ps.at[_PS[name]].set(v)
     es = jnp.zeros((spec.n_monster_status,), I16)
     for name, v in (("STRENGTH", s.e_str), ("VULNERABLE", s.e_vuln), ("WEAK", s.e_weak),
@@ -21,7 +26,7 @@ def observe(spec: api.EnvSpec, s: State) -> api.Obs:
     return api.Obs(
         slot_card=s.slot_card, slot_upgraded=s.slot_up, slot_cost=s.slot_cost, slot_misc=s.slot_misc,
         piles=s.piles, known_top=s.known_top,
-        player=jnp.stack([s.hp, s.max_hp, s.block, s.energy]), player_status=ps,
+        player=jnp.stack([s.hp, s.max_hp, s.block, s.energy, s.p_energy_per_turn]), player_status=ps,
         enemy=jnp.stack([s.e_hp, s.e_max_hp, s.e_block, s.e_move, s.e_last, s.e_ai]), enemy_status=es,
         relics=s.relics, relic_counters=s.relic_ctr, potions=s.potions,
         potion_counts=s.potion_n, potion_capacity=s.potion_cap, choice=s.choice, turn=s.turn,
