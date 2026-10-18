@@ -733,6 +733,7 @@ namespace sts {
             case CardId::PANACHE:
             case CardId::PANIC_BUTTON:
             case CardId::PURITY:
+            case CardId::RAGE:
             case CardId::RECKLESS_CHARGE:
             case CardId::SADISTIC_NATURE:
             case CardId::SECRET_TECHNIQUE:
