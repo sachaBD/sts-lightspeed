@@ -46,9 +46,7 @@ def play_pre(spec: api.EnvSpec, s: State, d):
     hand = s.piles[api.PILE_HAND]
     s = s._replace(energy=i16(s.energy - s.slot_cost[d]), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1))
     # block
-    once = card_block(s, r[C("block")])
-    gain = jnp.where(r[C("block_twice")] == 1, card_block(s, once), once)
-    block = s.block + jnp.where(r[C("block")] > 0, gain, 0)
+    block = s.block + jnp.where(r[C("block")] > 0, card_block(s, r[C("block")]), 0)
     s = s._replace(block=i16(block))
     # damage x hits (same per-hit damage; block absorbs hit by hit, which sums to this)
     total = player_attack_damage(s, r[C("damage")]) * r[C("hits")]

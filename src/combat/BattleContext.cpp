@@ -1409,7 +1409,7 @@ void BattleContext::useAttackCard() {
             break;
 
         case CardId::IRON_WAVE: {
-            addToBot( Actions::GainBlock(calculateCardBlock(calculateCardBlock(up  ? 7 : 5))) );
+            addToBot( Actions::GainBlock(calculateCardBlock(up ? 7 : 5)) );
             addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 7 : 5)) );
             break;
         }
