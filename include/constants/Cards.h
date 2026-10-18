@@ -545,6 +545,7 @@ namespace sts {
             case CardId::IMPERVIOUS:
             case CardId::OFFERING:
             case CardId::REAPER:
+            case CardId::SEEING_RED:
 
             case CardId::PIERCING_WAIL:
             case CardId::BACKSTAB:
