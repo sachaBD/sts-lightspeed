@@ -3,6 +3,7 @@
 Needs the oracle binary (tools/build_oracle.sh); skipped otherwise. JAX consumes the C++ random outcomes
 (drawn cards, Champ rolls) through the private forced path, so states must match exactly.
 """
+import os
 import random
 
 import jax
@@ -19,7 +20,8 @@ from tests.oracle.client import BINARY, Oracle
 pytestmark = pytest.mark.skipif(not BINARY.exists(), reason="oracle not built (tools/build_oracle.sh)")
 
 SPEC = jaxsim.DEFAULT_SPEC
-FIGHTS = 300
+# Default: 60 fights (all three deck types, ~15 s). PARITY_FIGHTS=300 for the full run before big merges.
+FIGHTS = int(os.environ.get("PARITY_FIGHTS", "60"))
 _init = jax.jit(lambda start, key, forced: core_init.init(SPEC, start, key, forced))
 _step = jax.jit(lambda s, a, key, forced: core_step.step(SPEC, s, a, key, forced))
 KEY = jax.random.key(0)

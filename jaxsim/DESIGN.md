@@ -82,7 +82,7 @@ bench/bench_step.py      random-policy throughput
 
 ## Validation
 
-`tests/test_parity.py` plays 200 random-deck fights against the C++ simulator (the `jaxsim_oracle` process,
+`tests/test_parity.py` plays random-deck fights (60 by default, `PARITY_FIGHTS=300` for the full run) against the C++ simulator (the `jaxsim_oracle` process,
 built by `tools/build_oracle.sh`) and compares every step: piles, player, enemy, statuses, turn, outcome and
 the legal-action set. Once the fight is over only the result is compared (done, won, hp, max hp): effects still
 queued after the end (e.g. a Dark Embrace draw after the killing blow) are not modelled.
