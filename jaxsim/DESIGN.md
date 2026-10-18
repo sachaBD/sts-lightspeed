@@ -26,12 +26,19 @@ The C++ simulator in this repo is the trusted reference.
    - Up to K_TOP=2 known top cards cover put-on-top effects.
    - Created cards reuse a slot with the same identity, or take a free one. If none is free,
      ERR_SLOT_OVERFLOW is set.
-4. **Actions line up with slots.**
-   - Action d plays slot d, or picks it during a choice.
-   - Then END_TURN, P potion actions and DONE.
-   - A = D + P + 2 = 55.
-5. **Multi-card choices are sequential picks** in increasing slot order, finished by DONE. The C++ oracle
-   maps one subset action to the sequence of picks.
+4. **Actions line up with identity slots.**
+   - Action d plays one copy of card slot d, or picks one during a choice.
+   - Then END_TURN, P potion actions and DONE. A = D + P + 2 = 55.
+   - Potions are identity slots with counts too, so two Fire Potions are one action. Potion capacity
+     (2 / 3 / 5) is a separate field.
+   - About 3–12 actions are legal at a time. Masked actions get zero prior in mctx, so the width costs only
+     memory.
+5. **Choices pick from one pile row with a filter.**
+   - The rows are draw, hand, discard, exhaust and PILE_CHOICE. PILE_CHOICE holds generated "choose 1 of 3"
+     offers (Discovery, the Attack/Skill/Power/Colorless potions, Nilry's Codex, Toolbox).
+   - Picks are sequential, in non-decreasing slot order (the same slot repeats while copies remain).
+   - Exactly-N choices end automatically after N picks. DONE ends "up to N" choices.
+   - The C++ oracle maps one subset action to the sequence of picks.
 6. **Cards are rows of fixed effect columns**, applied by one fused `resolve_card` with masked arithmetic.
    There is no general opcode interpreter and no `while_loop` whose length depends on the data. PR #2 measured
    that every interpreter opcode costs about as much as the arrays it writes, for every lane in the batch.
@@ -39,6 +46,16 @@ The C++ simulator in this repo is the trusted reference.
    entries in shared arrays.
 8. **Integers everywhere.** int16 state and observations. Featurisation belongs to the consumer.
 9. **No silent failure.** Errors become `Outcome.error` bits and end the game as truncated.
+
+## Out of scope
+
+- Effects that put cards on the bottom of the draw pile (Forethought), and Frozen Eye. Both break the rule
+  that draw order is uniformly random given the counts.
+- Runic Dome. Cards that generate cards from another character's pool. Other characters' relics and potions.
+- Relics that only matter with several enemies or on enemy death (Gremlin Horn, The Specimen, Preserved
+  Insect, Sling of Courage), and Smoke Bomb.
+
+`make_start` rejects out-of-scope content. The device side flags ERR_UNSUPPORTED.
 
 ## Ids
 

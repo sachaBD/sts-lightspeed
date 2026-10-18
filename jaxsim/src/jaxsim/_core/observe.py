@@ -11,7 +11,8 @@ def observe(spec: api.EnvSpec, s: State) -> api.Obs:
         piles=s.piles, known_top=s.known_top,
         player=jnp.stack([s.hp, s.max_hp, s.block, s.energy]), player_status=s.p_status,
         enemy=jnp.stack([s.e_hp, s.e_max_hp, s.e_block, s.e_move]), enemy_status=s.e_status,
-        relics=s.relics, relic_counters=s.relic_ctr, potions=s.potions, choice=s.choice, turn=s.turn,
+        relics=s.relics, relic_counters=s.relic_ctr, potions=s.potions,
+        potion_counts=s.potion_n, potion_capacity=s.potion_cap, choice=s.choice, turn=s.turn,
     )
 
 

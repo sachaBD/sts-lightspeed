@@ -27,7 +27,9 @@ class State(NamedTuple):
     p_status: jax.Array       # [n_player_status] (hot statuses will move to scalars)
     relics: jax.Array         # [R]
     relic_ctr: jax.Array      # [R]
-    potions: jax.Array        # [P]
+    potions: jax.Array        # [P] ids
+    potion_n: jax.Array       # [P] counts
+    potion_cap: jax.Array
     # enemy (The Champ)
     e_hp: jax.Array
     e_max_hp: jax.Array

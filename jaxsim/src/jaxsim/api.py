@@ -17,10 +17,16 @@ Semantics (enforced by tests/test_contract.py):
 * **Fixed action layout** (size `spec.A`):
     [0, D)          play the card in slot d, or pick slot d while a choice is pending
     D               END_TURN
-    [D+1, D+1+P)    use potion slot p
-    D+1+P           DONE: finish a pending choice
-  Multi-card choices are sequential picks ending with DONE; picks must go in increasing slot order so every
-  subset has exactly one path.
+    [D+1, D+1+P)    drink one potion of potion slot p
+    D+1+P           DONE: finish an "up to N" / "any number" choice
+* **Slots are identities with counts.** A card slot is one (card, upgraded, cost, misc) identity; a potion slot
+  is one potion id. Copies share a slot and are one action, so the search never branches on identical copies.
+  Slot order carries no meaning. A copy whose identity changes (e.g. cost) moves to the matching slot.
+* **Choices pick from one pile row.** A pending choice names a source pile (hand, draw, discard, exhaust or
+  PILE_CHOICE for generated "choose 1 of 3" offers) and a filter; slot actions pick from it. Picks must be in
+  non-decreasing slot order (the same slot again is allowed while copies remain) so every multiset of picks
+  has exactly one path. Exactly-N choices end automatically after N picks; DONE ends "up to N" choices.
+  END_TURN and potions are illegal while a choice is pending.
 * **Terminal states are absorbing.** Once `outcome(s).done`, `step` returns `s` unchanged and `legal_mask`
   allows only END_TURN, so a search always has one legal action.
 * **Truncation is not a loss.** The turn cap sets `truncated` (with `won=False`); consumers decide how to score.
@@ -46,7 +52,7 @@ CONTRACT = "jaxsim_champ_v1"
 __all__ = [
     "CONTRACT", "EnvSpec", "DEFAULT_SPEC", "StartSpec", "Obs", "Outcome", "Env", "make_env",
     "CARD_NAMES", "RELIC_NAMES", "POTION_NAMES", "MOVE_NAMES", "PLAYER_STATUS_NAMES", "MONSTER_STATUS_NAMES",
-    "PILE_DRAW", "PILE_HAND", "PILE_DISCARD", "PILE_EXHAUST", "NUM_PILES",
+    "PILE_DRAW", "PILE_HAND", "PILE_DISCARD", "PILE_EXHAUST", "PILE_CHOICE", "NUM_PILES",
     "ERR_ILLEGAL_ACTION", "ERR_SLOT_OVERFLOW", "ERR_INVALID_START", "ERR_UNSUPPORTED", "ERR_QUEUE_OVERFLOW",
 ]
 
@@ -59,8 +65,8 @@ PLAYER_STATUS_NAMES: tuple[str, ...] = _ids.PLAYER_STATUS
 MONSTER_STATUS_NAMES: tuple[str, ...] = _ids.MONSTER_STATUS
 
 # Pile rows of Obs.piles.
-PILE_DRAW, PILE_HAND, PILE_DISCARD, PILE_EXHAUST = range(4)
-NUM_PILES = 4
+PILE_DRAW, PILE_HAND, PILE_DISCARD, PILE_EXHAUST, PILE_CHOICE = range(5)
+NUM_PILES = 5  # PILE_CHOICE: cards offered by a pending "choose 1 of N generated cards"
 
 # Error bits of Outcome.error.
 ERR_ILLEGAL_ACTION = 1 << 0   # step got an action legal_mask did not allow
@@ -76,7 +82,7 @@ class EnvSpec:
 
     D: int = 48          # card slots per fight: distinct (card, upgraded, cost, misc) identities incl. generated cards
     H: int = 10          # max hand size
-    P: int = 5           # potion slots
+    P: int = 5           # potion slots: distinct potion ids held (capacity is per fight, <= P)
     R: int = 32          # relic slots
     K_TOP: int = 2       # known cards on top of the draw pile
     CHOICE: int = 4      # width of the pending-choice descriptor
@@ -137,7 +143,9 @@ class StartSpec(NamedTuple):
     upgraded: jax.Array    # [D] 0/1 (Searing Blow: upgrade count)
     count: jax.Array       # [D] copies in the deck
     relics: jax.Array      # [R] relic ids, 0 = empty
-    potions: jax.Array     # [P] potion ids, 0 = empty
+    potions: jax.Array     # [P] potion ids, distinct, 0 = empty
+    potion_count: jax.Array  # [P] copies held per potion slot
+    potion_capacity: jax.Array  # [] potion slots the player has (2 / 3 / 5); sum(potion_count) <= capacity
     hp: jax.Array          # []
     max_hp: jax.Array      # []
     ascension: jax.Array   # []
@@ -162,7 +170,9 @@ class Obs(NamedTuple):
     enemy_status: jax.Array    # [n_monster_status] amount per status id
     relics: jax.Array          # [R] relic ids
     relic_counters: jax.Array  # [R] per-relic counter (Pen Nib, Nunchaku, ...), 0 if none
-    potions: jax.Array         # [P] potion ids
+    potions: jax.Array         # [P] potion ids, 0 = empty
+    potion_counts: jax.Array   # [P] copies held
+    potion_capacity: jax.Array  # []
     choice: jax.Array          # [CHOICE] kind, picks left, source pile, last picked slot; kind 0 = none
     turn: jax.Array            # []
 

@@ -12,10 +12,24 @@ def test_identical_cards_share_a_slot():
 
 
 @pytest.mark.parametrize("kw", [dict(deck=["NOT_A_CARD"], hp=10), dict(deck=["BASH"], hp=0),
-                                dict(deck=["BASH"], hp=10, max_hp=5), dict(deck=["BASH"], hp=10, relics=["X"])])
+                                dict(deck=["BASH"], hp=10, max_hp=5), dict(deck=["BASH"], hp=10, relics=["X"]),
+                                dict(deck=["FORETHOUGHT"], hp=10), dict(deck=["BASH"], hp=10, relics=["FROZEN_EYE"]),
+                                dict(deck=["BASH"], hp=10, potions=["SMOKE_BOMB"])])
 def test_bad_input_raises(kw):
     with pytest.raises(ValueError):
         jaxsim.make_start(**kw)
+
+
+def test_identical_potions_share_a_slot():
+    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION", "FIRE_POTION", "BLOCK_POTION"])
+    assert np.asarray(s.potion_count).tolist()[:3] == [1, 2, 0]
+    assert int(s.potion_capacity) == 3
+    assert int(jaxsim.make_start(["BASH"], hp=10, ascension=11).potion_capacity) == 2
+
+
+def test_potions_over_capacity_raise():
+    with pytest.raises(ValueError):
+        jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"] * 3, ascension=11)
 
 
 def test_too_many_distinct_cards():

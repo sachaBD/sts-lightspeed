@@ -13,7 +13,7 @@ def env():
 
 @pytest.fixture(scope="session")
 def start():
-    return jaxsim.make_start(IRONCLAD_STARTER, hp=80, relics=["BURNING_BLOOD"])
+    return jaxsim.make_start(IRONCLAD_STARTER, hp=80, relics=["BURNING_BLOOD"], potions=["FIRE_POTION"] * 2)
 
 
 @pytest.fixture

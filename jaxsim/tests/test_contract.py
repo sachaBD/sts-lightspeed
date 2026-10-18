@@ -40,7 +40,7 @@ def test_shapes_and_dtypes(env, start, key):
     expect = dict(slot_card=(sp.D,), slot_upgraded=(sp.D,), slot_cost=(sp.D,), slot_misc=(sp.D,),
                   piles=(api.NUM_PILES, sp.D), known_top=(sp.K_TOP,), player=(4,),
                   player_status=(sp.n_player_status,), enemy=(4,), enemy_status=(sp.n_monster_status,),
-                  relics=(sp.R,), relic_counters=(sp.R,), potions=(sp.P,), choice=(sp.CHOICE,), turn=())
+                  relics=(sp.R,), relic_counters=(sp.R,), potions=(sp.P,), potion_counts=(sp.P,), potion_capacity=(), choice=(sp.CHOICE,), turn=())
     assert set(expect) == set(o._fields)
     for f, shape in expect.items():
         x = getattr(o, f)
@@ -59,9 +59,14 @@ def test_init_valid(env, start, key):
 
 
 def test_invalid_start_flags_error(env, start, key):
-    bad = start._replace(count=start.count.at[-1].set(3))  # count on an empty slot
-    out = env.outcome(env.init(bad, key))
-    assert out.done and out.truncated and int(out.error) & api.ERR_INVALID_START
+    bads = [
+        start._replace(count=start.count.at[-1].set(3)),                     # count on an empty card slot
+        start._replace(potion_count=start.potion_count.at[-1].set(1)),       # count on an empty potion slot
+        start._replace(potion_capacity=jnp.int16(0)),                        # more potions than capacity
+    ]
+    for bad in bads:
+        out = env.outcome(env.init(bad, key))
+        assert out.done and out.truncated and int(out.error) & api.ERR_INVALID_START
 
 
 def test_deterministic(env, start, key):
