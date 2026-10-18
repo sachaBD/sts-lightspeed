@@ -52,7 +52,9 @@ def random_deck(rng: random.Random):
     from jaxsim._core.tables import cards as tc
     pool = [c for c in jaxsim.supported_cards() if c not in tc.NOT_IN_DECKS + ("ASCENDERS_BANE",)]
     deck = [("ASCENDERS_BANE", 0)] + [(c, 0) for c in ["STRIKE_RED"] * 4 + ["DEFEND_RED"] * 4 + ["BASH"]]
-    deck += [(rng.choice(pool), rng.randint(0, 1)) for _ in range(rng.randint(0, 14))]
+    for _ in range(rng.randint(0, 14)):
+        card, up = rng.choice(pool), rng.randint(0, 1)
+        deck.append((card, rng.randint(1, 6) if card == "SEARING_BLOW" and up else up))
     if rng.random() < 0.3:
         deck.append(("WOUND", 0))
     return deck
@@ -129,7 +131,7 @@ def test_random_fight(fight):
             a = choose(rng, fight, legal, obs)
             before = np.asarray(obs.piles)[1].astype(np.int32)
             resp = oracle.step(legal[a])
-            after = convert.slot_counts(obs, resp["state"]["hand"], SPEC.D, new={})
+            after = convert.slot_counts(obs, resp["state"]["hand"], SPEC.D, new={}, ignore_cost=True)
             if a == SPEC.END_TURN:
                 drawn = after
             else:

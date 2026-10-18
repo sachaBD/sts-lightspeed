@@ -32,7 +32,25 @@ def playable(s: State):
     hand = s.piles[api.PILE_HAND] > 0
     only_attacks = jnp.sum(jnp.where(hand & (r[:, C("type")] != tc.ATTACK), 1, 0)) == 0
     clash_ok = (r[:, C("special")] != tc.SP_CLASH) | only_attacks
-    return hand & (r[:, C("playable")] == 1) & (cost >= 0) & (cost <= s.energy) & clash_ok
+    affordable = (cost == -1) | ((cost >= 0) & (cost <= s.energy))   # -1 = X: always playable
+    return hand & (r[:, C("playable")] == 1) & affordable & clash_ok
+
+
+def blood_events(s: State, events) -> State:
+    """CardInstance::tookDamage on every hp-loss event: Blood for Blood costs 1 less (not below 0)."""
+    blood = rows(s)[:, C("blood_cost")] == 1
+    cost = jnp.where(blood, jnp.maximum(s.slot_cost - events, 0), s.slot_cost)
+    return s._replace(slot_cost=cost.astype(I16))
+
+
+def exhaust_hand(s: State, mask):
+    """Exhaust every hand copy of the slots in `mask`, with on-exhaust triggers (Sentinel's energy).
+    Returns (state, number exhausted)."""
+    p = s.piles.astype(I32)
+    n = jnp.where(mask, p[api.PILE_HAND], 0)
+    p = p.at[api.PILE_HAND].add(-n).at[api.PILE_EXHAUST].add(n)
+    energy = s.energy + jnp.sum(n * rows(s)[:, C("exhaust_energy")])
+    return s._replace(piles=p.astype(I16), energy=energy.astype(I16)), n.sum()
 
 
 def player_attack_damage(s: State, base):
@@ -54,22 +72,44 @@ def play_pre(spec: api.EnvSpec, s: State, d):
     sp = r[C("special")]
     i16 = lambda x: jnp.asarray(x).astype(I16)
     hand = s.piles[api.PILE_HAND]
-    s = s._replace(energy=i16(s.energy - s.slot_cost[d]), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1))
+    x = s.energy.astype(I32)                                            # X for X-cost cards
+    spent = jnp.where(s.slot_cost[d] == -1, x, s.slot_cost[d])
+    s = s._replace(energy=i16(s.energy - spent), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1))
 
     # self hp loss (no block); dying here ends the fight
     hp = s.hp - r[C("hp_loss")]
     died = hp <= 0
     s = s._replace(hp=i16(jnp.maximum(hp, 0)), done=s.done | died)
+    s = blood_events(s, (r[C("hp_loss")] > 0).astype(I32))
     alive = ~s.done
 
-    # block (Entrench doubles current block, without dex/frail)
+    # exhaust before the effect: Fiend Fire (whole hand), Second Wind (non-attacks)
+    rs = rows(s)
+    non_attack = rs[:, C("type")] != tc.ATTACK
+    ex_mask = jnp.where(sp == tc.SP_FIEND_FIRE, True, jnp.where(sp == tc.SP_SECOND_WIND, non_attack, False))
+    s, n_exhausted = exhaust_hand(s, ex_mask & alive)
+
+    # block (Entrench doubles current block, without dex/frail; Second Wind: per exhausted card)
     gain = jnp.where(r[C("block")] > 0, card_block(s, r[C("block")]), 0)
+    gain = jnp.where(sp == tc.SP_SECOND_WIND, gain * n_exhausted, gain)
     gain = gain + jnp.where(sp == tc.SP_ENTRENCH, s.block, 0)
+    body_slam_block = s.block
     s = s._replace(block=i16(s.block + gain * alive))
 
     # damage x hits (same per-hit damage; block absorbs hit by hit, which sums to this)
     dropkick_bonus = (sp == tc.SP_DROPKICK) & (s.e_vuln > 0)          # checked before the hit
-    total = player_attack_damage(s, r[C("damage")]) * r[C("hits")] * alive
+    p = s.piles.astype(I32)
+    strikes = jnp.sum(rs[:, C("is_strike")] * (p[api.PILE_HAND] + p[api.PILE_DRAW] + p[api.PILE_DISCARD]))
+    n_up = s.slot_up[d].astype(I32)
+    amt = r[C("special_amt")]
+    base = jnp.select(
+        [sp == tc.SP_HEAVY_BLADE, sp == tc.SP_PERFECTED_STRIKE, sp == tc.SP_BODY_SLAM, sp == tc.SP_SEARING_BLOW,
+         sp == tc.SP_RAMPAGE],
+        [r[C("damage")] + amt * s.p_str, r[C("damage")] + amt * (strikes + 1), body_slam_block,
+         n_up * (n_up + 7) // 2 + 12, r[C("damage")] + s.slot_misc[d]],
+        r[C("damage")])
+    hits = jnp.select([sp == tc.SP_WHIRLWIND, sp == tc.SP_FIEND_FIRE], [x, n_exhausted], r[C("hits")])
+    total = player_attack_damage(s, base) * hits * alive
     blocked = jnp.minimum(s.e_block.astype(I32), total)
     unblocked = total - blocked
     e_hp = s.e_hp - unblocked
@@ -85,6 +125,7 @@ def play_pre(spec: api.EnvSpec, s: State, d):
 
     # everything below is cleared on victory
     live = ~s.done
+    s, _ = exhaust_hand(s, (sp == tc.SP_SEVER_SOUL) & non_attack & live)   # queued behind its attack
     p_str = s.p_str + r[C("p_str")] * live
     p_str = p_str + jnp.where((sp == tc.SP_SPOT_WEAKNESS) & champ.is_attack(s.e_move) & live, r[C("special_amt")], 0)
     p_str = jnp.where((sp == tc.SP_LIMIT_BREAK) & live, p_str * 2, p_str)
@@ -118,6 +159,11 @@ def play_post(spec: api.EnvSpec, s: State, d):
     # the played card leaves: powers vanish, exhausting cards go to exhaust, the rest to discard.
     # After a win it still leaves (OnAfterCardUsed survives victory); after the player dies it stays in limbo.
     dest = jnp.where(r[C("exhausts")] == 1, api.PILE_EXHAUST, api.PILE_DISCARD)
+    rampage = r[C("special")] == tc.SP_RAMPAGE   # leaves with its bonus raised: a new identity
+    s2, slot2, ok2 = piles.find_or_alloc(s, s.slot_card[d], s.slot_up[d], s.slot_cost[d],
+                                         s.slot_misc[d] + r[C("special_amt")])
+    s = tree_where(rampage & ok2, s2, s)
+    leave = jnp.where(rampage & ok2, slot2, d)
     p = s.piles.astype(I32)
-    p = p.at[dest, d].add(jnp.where((r[C("type")] == tc.POWER) | (s.hp <= 0), 0, 1))
+    p = p.at[dest, leave].add(jnp.where((r[C("type")] == tc.POWER) | (s.hp <= 0), 0, 1))
     return s._replace(piles=p.astype(I16))

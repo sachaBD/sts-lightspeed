@@ -31,6 +31,9 @@ def end_turn_pre(spec: api.EnvSpec, s: State, roll) -> State:
     burn = jnp.sum(hand * r[:, tc.col("eot_damage")])
     blocked = jnp.minimum(s.block.astype(I32), burn)
     hp = s.hp - (burn - blocked)
+    n_burns = jnp.sum(jnp.where(r[:, tc.col("eot_damage")] > 0, hand, 0))
+    per_burn = jnp.maximum(burn // jnp.maximum(n_burns, 1), 1)
+    s = cards.blood_events(s, jnp.where(burn > blocked, jnp.maximum(n_burns - s.block.astype(I32) // per_burn, 0), 0))
     died = hp <= 0
     s = s._replace(block=(s.block - blocked).astype(I16), hp=jnp.maximum(hp, 0).astype(I16), done=s.done | died)
     at_death = s

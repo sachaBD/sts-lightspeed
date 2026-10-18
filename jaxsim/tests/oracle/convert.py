@@ -17,16 +17,23 @@ ACTION_CARD, ACTION_END_TURN = 0, 4
 OUTCOME_VICTORY, OUTCOME_LOSS = 1, 2
 
 
-def identity(c) -> tuple[int, int]:
-    """C++ card json [id, upgrades, cost, costForTurn, misc] -> jaxsim (card id, upgraded)."""
-    return CARD[ids.CARDS_CPP[c[0]]], c[1]
+MISC_CARDS = {"RAMPAGE"}  # cards whose C++ specialData is part of the jaxsim identity (slot_misc)
 
 
-def slot_of(obs, ident, new: dict | None = None) -> int:
+def identity(c) -> tuple[int, int, int, int]:
+    """C++ card json [id, upgrades, cost, costForTurn, misc] -> jaxsim identity (card, upgraded, cost, misc)."""
+    name = ids.CARDS_CPP[c[0]]
+    return CARD[name], c[1], c[2], c[4] if name in MISC_CARDS else 0
+
+
+def slot_of(obs, ident, new: dict | None = None, ignore_cost: bool = False) -> int:
     """jaxsim slot of a card identity. An identity created during the step has no slot in `obs` yet; with `new`
-    it gets the next empty slot, as piles.find_or_alloc assigns them."""
-    card, up = ident
-    hit = np.flatnonzero((np.asarray(obs.slot_card) == card) & (np.asarray(obs.slot_upgraded) == up))
+    it gets the next never-used slot, as piles.find_or_alloc assigns them. ignore_cost: match a pre-step
+    observation whose costs may have changed during the step (Blood for Blood)."""
+    card, up, cost, misc = ident
+    same_cost = True if ignore_cost else (np.asarray(obs.slot_cost) == cost)
+    hit = np.flatnonzero((np.asarray(obs.slot_card) == card) & (np.asarray(obs.slot_upgraded) == up)
+                         & same_cost & (np.asarray(obs.slot_misc) == misc))
     if len(hit) == 1:
         return int(hit[0])
     if len(hit) == 0 and new is not None:
@@ -34,13 +41,13 @@ def slot_of(obs, ident, new: dict | None = None) -> int:
             empty = np.flatnonzero(np.asarray(obs.slot_card) == 0)
             new[ident] = int(empty[len(new)])
         return new[ident]
-    raise KeyError(f"no unique slot for {jaxsim.CARD_NAMES[card]}+{up}")
+    raise KeyError(f"no unique slot for {jaxsim.CARD_NAMES[card]}+{up} cost {cost} misc {misc}")
 
 
-def slot_counts(obs, cards, D, new: dict | None = None) -> np.ndarray:
+def slot_counts(obs, cards, D, new: dict | None = None, ignore_cost: bool = False) -> np.ndarray:
     out = np.zeros(D, np.int32)
     for ident, n in Counter(identity(c) for c in cards).items():
-        out[slot_of(obs, ident, new)] += n
+        out[slot_of(obs, ident, new, ignore_cost)] += n
     return out
 
 
