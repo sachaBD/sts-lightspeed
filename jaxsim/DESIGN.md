@@ -96,13 +96,19 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
 - When a card wins the fight, its later effects are skipped (Bash's Vulnerable, Anger's copy, draws), but the
   card itself still goes to the discard pile.
 - When the player dies during the Champ's turn, everything stops there: no debuffs, no roll, no end of round.
+- After a winning hit, block, HP loss, healing and the played card leaving still happen; other effects don't
+  (C++ `clearOnCombatVictory`). If the player dies from their own card (Offering), the card stays in limbo.
+- No Draw stacks (two Battle Trances give No Draw 2). Ascender's Bane has cost −3.
 
 ## Supported content
 
-- Cards: Strike, Defend, Bash, Pommel Strike, Shrug It Off, Inflame, Twin Strike, Iron Wave, Anger, Wild Strike,
-  Wound and Ascender's Bane, upgraded and unupgraded.
+- **Cards** (`jaxsim.supported_cards()`), upgraded and unupgraded:
+  - starter cards, PR #2's set, and batch 1 of #5 (table rows and small columns);
+  - the statuses those cards create: Wound, Dazed, Burn;
+  - Ascender's Bane.
 - No relic effects and no potions yet. Relics are carried in the observation only.
-- `jaxsim.supported_cards()` lists the cards. `make_start` rejects anything else.
+- `make_start` rejects anything else.
+- The card table's cost, type, exhausts and ethereal values are checked against the C++ card data (`test_card_table_matches_cpp`).
 
 ## Measurements
 

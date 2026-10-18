@@ -17,7 +17,7 @@ class State(NamedTuple):
     # card slots: identity per slot, counts per pile
     slot_card: jax.Array      # [D]
     slot_up: jax.Array        # [D]
-    slot_cost: jax.Array      # [D] identity cost (-1 unplayable)
+    slot_cost: jax.Array      # [D] identity cost (-2 unplayable, -1 X)
     slot_misc: jax.Array      # [D]
     piles: jax.Array          # [NUM_PILES, D]
     known_top: jax.Array      # [K_TOP], -1 = none
@@ -32,6 +32,8 @@ class State(NamedTuple):
     p_weak: jax.Array
     p_frail: jax.Array
     p_ja: jax.Array           # just-applied bits for monster-sourced debuffs: 1 vuln, 2 weak, 4 frail
+    p_lose_str: jax.Array     # Flex: strength lost at end of turn
+    p_no_draw: jax.Array      # Battle Trance: no more draws this turn (stacks, like the C++ status)
     relics: jax.Array         # [R] ids (observation only for now)
     relic_ctr: jax.Array      # [R]
     potions: jax.Array        # [P] ids

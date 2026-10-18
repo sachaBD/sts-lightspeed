@@ -31,7 +31,7 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
         piles=z(api.NUM_PILES, spec.D).at[api.PILE_DRAW].set(count.astype(I16)),
         known_top=jnp.full((spec.K_TOP,), -1, I16),
         hp=start.hp.astype(I16), max_hp=start.max_hp.astype(I16), block=I16(0), energy=I16(3),
-        p_str=I16(0), p_dex=I16(0), p_vuln=I16(0), p_weak=I16(0), p_frail=I16(0), p_ja=I16(0),
+        p_str=I16(0), p_dex=I16(0), p_vuln=I16(0), p_weak=I16(0), p_frail=I16(0), p_ja=I16(0), p_lose_str=I16(0), p_no_draw=I16(0),
         relics=start.relics.astype(I16), relic_ctr=z(spec.R), potions=start.potions.astype(I16),
         potion_n=start.potion_count.astype(I16), potion_cap=start.potion_capacity.astype(I16),
         e_hp=I16(champ.HP), e_max_hp=I16(champ.HP), e_block=I16(0), e_str=I16(0), e_vuln=I16(0), e_weak=I16(0),

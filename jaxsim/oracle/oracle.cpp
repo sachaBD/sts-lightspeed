@@ -6,6 +6,7 @@
 //   {"cmd":"start","seed":S,"hp":H,"max_hp":M,"deck":[[card,upgraded],...],"relics":[...],"potions":[...],
 //    "potion_capacity":2}                                  -> {"state":..., "actions":[...], "ai_rolls":[...]}
 //   {"cmd":"step","bits":B}                                -> {"state":..., "actions":[...], "ai_rolls":[...]}
+//   {"cmd":"cards"}                                        -> {"cards":[[id, upgraded, cost, type, exhausts, ethereal]]}
 //
 // ai_rolls: the aiRng.random(99) values consumed by the request (The Champ's move rolls), recovered by replaying
 // a copy of aiRng. Errors: {"error":"..."}. Ascension 20, act 2 boss room, encounter CHAMP.
@@ -157,6 +158,15 @@ int main() {
                 const Random before = bc->aiRng;
                 a.execute(*bc);
                 resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(before, bc->aiRng)}};
+            } else if (cmd == "cards") {
+                Json cards = Json::array();
+                for (int id = 1; id < static_cast<int>(CardId::ZAP) + 1; ++id) {
+                    for (int up = 0; up < 2; ++up) {
+                        const CardInstance c{static_cast<CardId>(id), up == 1};
+                        cards.push_back({id, up, c.cost, static_cast<int>(c.getType()), c.doesExhaust(), c.isEthereal()});
+                    }
+                }
+                resp = {{"cards", cards}};
             } else {
                 throw std::runtime_error{"unknown cmd " + cmd};
             }

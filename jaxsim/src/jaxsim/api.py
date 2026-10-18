@@ -161,7 +161,7 @@ class Obs(NamedTuple):
 
     slot_card: jax.Array       # [D] card id (0 = empty slot)
     slot_upgraded: jax.Array   # [D]
-    slot_cost: jax.Array       # [D] current cost this turn (-1 = unplayable, -2 = X)
+    slot_cost: jax.Array       # [D] current cost this turn (-2 = unplayable, -1 = X; the C++ convention)
     slot_misc: jax.Array       # [D] per-card value (Rampage / Ritual Dagger / Genetic Algorithm ...)
     piles: jax.Array           # [NUM_PILES, D] counts, rows PILE_*
     known_top: jax.Array       # [K_TOP] slot ids on top of the draw pile, top first; -1 = unknown

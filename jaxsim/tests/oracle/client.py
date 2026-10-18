@@ -25,6 +25,9 @@ class Oracle:
     def step(self, bits):
         return self._req(dict(cmd="step", bits=bits))
 
+    def cards(self):
+        return self._req(dict(cmd="cards"))["cards"]
+
     def close(self):
         self.p.stdin.close()
         self.p.wait()

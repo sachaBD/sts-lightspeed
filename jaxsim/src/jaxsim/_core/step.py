@@ -24,10 +24,20 @@ def legal_mask(spec: api.EnvSpec, s: State):
 
 
 def end_turn_pre(spec: api.EnvSpec, s: State, roll) -> State:
-    # discard the hand; ethereal cards exhaust
+    r = cards.rows(s)
     p = s.piles.astype(I32)
-    eth = cards.rows(s)[:, tc.col("ethereal")]
     hand = p[api.PILE_HAND]
+    # end-of-turn cards in hand (Burn): blockable damage; dying here ends the fight
+    burn = jnp.sum(hand * r[:, tc.col("eot_damage")])
+    blocked = jnp.minimum(s.block.astype(I32), burn)
+    hp = s.hp - (burn - blocked)
+    died = hp <= 0
+    s = s._replace(block=(s.block - blocked).astype(I16), hp=jnp.maximum(hp, 0).astype(I16), done=s.done | died)
+    at_death = s
+    # end-of-turn powers: Flex's strength loss, Battle Trance's no-draw
+    s = s._replace(p_str=(s.p_str - s.p_lose_str).astype(I16), p_lose_str=I16(0), p_no_draw=I16(0))
+    # discard the hand; ethereal cards exhaust
+    eth = r[:, tc.col("ethereal")]
     p = (p.at[api.PILE_EXHAUST].add(hand * eth).at[api.PILE_DISCARD].add(hand * (1 - eth))
           .at[api.PILE_HAND].set(0))
     s = s._replace(piles=p.astype(I16))
@@ -36,7 +46,8 @@ def end_turn_pre(spec: api.EnvSpec, s: State, roll) -> State:
     turn = nxt.turn + 1
     cap = turn >= spec.max_turns
     nxt = nxt._replace(turn=turn.astype(I16), block=I16(0), done=nxt.done | cap, truncated=nxt.truncated | cap)
-    return tree_where(s.done, s, nxt)  # died during the Champ's turn: frozen at that moment
+    nxt = tree_where(s.done, s, nxt)  # died during the Champ's turn: frozen at that moment
+    return tree_where(died, at_death, nxt)
 
 
 def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
