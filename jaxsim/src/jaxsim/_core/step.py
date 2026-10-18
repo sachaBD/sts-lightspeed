@@ -21,7 +21,6 @@ from jaxsim._core.state import I16, I32, U32, State, tree_where
 from jaxsim._core.tables import cards as tc
 
 HAND_DRAW = 5
-MAX_DRAW = 10   # per draw point: the hand holds at most 10 cards
 i16 = hooks.i16
 
 
@@ -60,19 +59,21 @@ def end_mid(spec: api.EnvSpec, s: State, roll):
     s = champ.take_turn(s, roll)
     go = ~s.done
     nxt = champ.end_of_round(s)
-    turn = nxt.turn + 1
-    cap = turn >= spec.max_turns
-    block = jnp.where(nxt.p_barricade > 0, nxt.block, I16(0))
-    nxt = nxt._replace(turn=i16(turn), block=block, p_flame_barrier=I16(0), done=nxt.done | cap,
-                       truncated=nxt.truncated | cap)
-    s = tree_where(go, nxt, s)
+    w = lambda new, old: jnp.where(go, new, old)
+    cap = go & (s.turn + 1 >= spec.max_turns)
+    s = s._replace(
+        e_block=w(nxt.e_block, s.e_block), e_vuln=w(nxt.e_vuln, s.e_vuln), e_weak=w(nxt.e_weak, s.e_weak),
+        p_vuln=w(nxt.p_vuln, s.p_vuln), p_weak=w(nxt.p_weak, s.p_weak), p_frail=w(nxt.p_frail, s.p_frail),
+        p_ja=w(nxt.p_ja, s.p_ja), turn=w(i16(s.turn + 1), s.turn),
+        block=w(jnp.where(s.p_barricade > 0, s.block, I16(0)), s.block),
+        p_flame_barrier=w(I16(0), s.p_flame_barrier), done=s.done | cap, truncated=s.truncated | cap)
     # Brutality: lose hp (not self damage) and draw, after the hand draw
     s = hooks.lose_hp(s, s.p_brutality.astype(I32), False, ~s.done & (s.p_brutality > 0))
     return s, jnp.where(s.done, 0, HAND_DRAW + s.p_brutality.astype(I32))
 
 
-def end_post(s: State) -> State:
-    go = ~s.done
+def end_post(s: State, is_end) -> State:
+    go = is_end & ~s.done
     return s._replace(p_str=i16(s.p_str + jnp.where(go, s.p_demon_form, 0)),
                       energy=jnp.where(go, s.p_energy_per_turn, s.energy))
 
@@ -89,14 +90,14 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     played, n_own, trig, jugg = cards.play_pre(spec, s, d)
     ended, n_de = end_pre(spec, s)
     mid = tree_where(is_end, ended, played)
-    mid, forced, evolve_later = piles.draw(spec, mid, jnp.where(is_end, n_de, n_own), k_a, forced, MAX_DRAW, extend=False)
+    mid, forced, evolve_later = piles.draw(spec, mid, jnp.where(is_end, n_de, n_own), k_a, forced, extend=False)
 
     left, trig2 = cards.play_post(spec, mid, d, jugg)
     turned, n_hand = end_mid(spec, mid, roll)
     mid = tree_where(is_end, turned, left)
     n_b = jnp.where(is_end, n_hand, trig + trig2) + evolve_later
-    mid, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, MAX_DRAW, extend=True)
-    nxt = tree_where(is_end, end_post(mid), mid)
+    mid, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
+    nxt = end_post(mid, is_end)
 
     # one full select: illegal actions and terminal states keep s; then patch flags
     take = ok & ~s.done

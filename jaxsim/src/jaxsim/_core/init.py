@@ -47,5 +47,5 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
     innate = jnp.where(rows[:, tc.col("innate")] == 1, count, 0)
     innate = jnp.minimum(innate, jnp.maximum(spec.H - jnp.cumsum(innate) + innate, 0)).astype(I16)
     s = s._replace(piles=s.piles.at[api.PILE_DRAW].add(-innate).at[api.PILE_HAND].add(innate))
-    s, _, _ = piles.draw(spec, s, jnp.where(bad, 0, jnp.maximum(5 - innate.sum(), 0)), k_draw, forced, 5, extend=False)
+    s, _, _ = piles.draw(spec, s, jnp.where(bad, 0, jnp.maximum(5 - innate.sum(), 0)), k_draw, forced, extend=False)
     return s
