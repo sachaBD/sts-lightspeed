@@ -1,130 +1,72 @@
-# JAX Champ fight: scope and table-driven design
+# jaxsim design
 
-Goal: RL with a value network on **Ironclad vs The Champ**, arbitrary deck,
-all Ironclad-obtainable relics and potions, fast enough to give a 10–100×
-throughput gain over the C++ search pipeline (~15 s per fight today).
+**Goal:** the fastest possible simulator of Ironclad vs The Champ, for any deck, built for AlphaZero-style
+self-play on one GPU (RTX 3060 or 3090). Search, network and simulator all run inside one jitted program.
+The C++ simulator in this repo is the trusted reference.
 
-## Scope
+## Boundaries
 
-In:
-- Ironclad cards (75), the colorless cards Ironclad can own, curses, the
-  statuses Ironclad's own cards make (Wound, Dazed, Burn).
-- Every relic and potion an Ironclad run can have that matters in combat,
-  including post-combat heals (they change the outcome value).
-- The Champ only, one fixed ascension.
+- **`jaxsim` (this package) owns the rules:** state, legal actions, transitions, observation and outcome.
+  The public contract is `src/jaxsim/api.py`.
+- **The play library (sts-ml) owns choices:** search (mctx), network, rewards and targets, replay buffer and
+  learner. It sees the simulator only through `jaxsim.Env`.
+- The boundary exists only while JAX traces the code, so it costs nothing at runtime: the play library's
+  jitted loop traces straight through `Env` functions.
 
-Out:
-- Runic Dome.
-- Cards that generate cards from another character's pool.
-- Other characters' relics and potions.
-- Anything that only matters with several enemies or on enemy death
-  (Gremlin Horn, The Specimen, Preserved Insect, Sling of Courage), and
-  Smoke Bomb (can't escape a boss).
+## Core decisions
 
-What a single enemy buys:
-- No targeting in the action space.
-- Cleave equals a single-target hit, and random targets are fixed
-  (Sword Boomerang, Juggernaut, Havoc).
-- One monster AI, written as arithmetic instead of a per-monster switch.
+1. **Pure functions, one game each.** `step(state, action, key) -> state`. Callers use `vmap` and `jit`.
+2. **No RNG in the state.** All randomness comes from `key`. Search particles are different keys.
+3. **Piles are counts over per-fight card slots.**
+   - D=48 slots, one per distinct card identity: card id, upgraded, cost and misc.
+   - The observation says which card each slot holds, so slot order carries no meaning and a model
+     generalises across decks.
+   - Drawing samples from the draw counts. That is equivalent to a uniformly shuffled pile, so the draw
+     order is not hidden state.
+   - Up to K_TOP=2 known top cards cover put-on-top effects.
+   - Created cards reuse a slot with the same identity, or take a free one. If none is free,
+     ERR_SLOT_OVERFLOW is set.
+4. **Actions line up with slots.**
+   - Action d plays slot d, or picks it during a choice.
+   - Then END_TURN, P potion actions and DONE.
+   - A = D + P + 2 = 55.
+5. **Multi-card choices are sequential picks** in increasing slot order, finished by DONE. The C++ oracle
+   maps one subset action to the sequence of picks.
+6. **Cards are rows of fixed effect columns**, applied by one fused `resolve_card` with masked arithmetic.
+   There is no general opcode interpreter and no `while_loop` whose length depends on the data. PR #2 measured
+   that every interpreter opcode costs about as much as the arrays it writes, for every lane in the batch.
+7. **Relics and powers are masked scalar updates at fixed hook points.** Hot values are separate scalars, not
+   entries in shared arrays.
+8. **Integers everywhere.** int16 state and observations. Featurisation belongs to the consumer.
+9. **No silent failure.** Errors become `Outcome.error` bits and end the game as truncated.
 
-## Design
+## Ids
 
-- **Cards are table rows:** cost, type, flags, and up to K micro-ops
-  `(opcode, a, b)`. Upgraded and unupgraded versions are separate rows.
-- **A micro-op VM runs a fixed ring-buffer queue.** It keeps the C++
-  addToTop/addToBot semantics and dispatches with `lax.switch`. Under `vmap`,
-  every opcode body runs for every lane, so **the cost grows with the number
-  of opcodes. Keep the opcode count small and push variety into table
-  parameters.**
-- **Cards live in fixed slots,** with per-slot `cid`/`up`/`cost`/`misc`. Piles
-  are stacks of slot ids plus a length, so draw and discard are O(1) gathers.
-- **Relics and powers are counters in `ctr[C]`.** Each is applied at a fixed
-  hook point (combat start, turn start/end, card played by type, damage
-  dealt, HP lost, block, exhaust, shuffle, potion used, death, combat end).
-  The math is masked by relic presence, not branched on.
-- **Decision points with a choice are one generic state:** pick k cards from
-  a pile, with a filter, then run a follow-up op. This covers Armaments,
-  Burning Pact, True Grit+, Headbutt, Warcry, Dual Wield, Exhume, Elixir,
-  Gambling Chip, Forethought, Purity, Secret Technique/Weapon, Thinking Ahead
-  and Liquid Memories. "Choose 1 of 3 generated cards" (Discovery, the
-  Attack/Skill/Power/Colorless potions, Nilry's Codex, Toolbox) is the same
-  state over a 3-slot scratch pile.
+Ids are generated from the C++ enums by `tools/gen_ids.py`: 0 = NONE, then the C++ names in order. They are
+checked in CI against the headers and are part of the contract.
 
-## Classification
+## Layout
 
-**Plain table rows.** These need only the base primitives: attack, block,
-status, draw, energy, lose HP, heal, add card.
-- Strike, Defend, Bash, Anger, Cleave, Clothesline, Iron Wave, Pommel Strike,
-  Shrug It Off, Thunderclap, Twin Strike, Flex, Inflame, Bloodletting,
-  Hemokinesis, Uppercut, Shockwave, Intimidate, Disarm, Sword Boomerang
-- Wild Strike, Reckless Charge, Power Through, Immolate, Carnage, Bludgeon,
-  Pummel, Seeing Red, Ghostly Armor, Battle Trance, Offering, Impervious,
-  Spot Weakness, Dropkick, Entrench, Limit Break, Clash
-- Most colorless cards (Bandage Up, Blind, Dark Shackles, Deep Breath,
-  Dramatic Entrance, Finesse, Flash of Steel, Good Instincts, Impatience,
-  Panacea, Panic Button, Swift Strike, Trip, Bite, J.A.X., Apparition)
-- Most potions (Block, Blood, Cultist, Dexterity, Energy, Essence of Steel,
-  Explosive, Fear, Fire, Flex, Fruit Juice, Heart of Iron, Liquid Bronze,
-  Regen, Speed, Strength, Swift, Weak, Ancient, Fairy)
-
-**Table row plus a formula field.** Damage or block comes from a formula:
-strength multiplier, X cost, block, per-tag count, or per-card misc value.
-- Heavy Blade, Perfected Strike, Body Slam, Whirlwind, Searing Blow, Rampage,
-  Ritual Dagger, Mind Blast, Fiend Fire, Second Wind, Sever Soul, Feed,
-  Reaper, Blood for Blood, Transmutation, Chemical X
-
-**Powers as counters and hooks.**
-- Demon Form, Metallicize, Combust, Brutality, Berserk, Barricade,
-  Corruption, Juggernaut, Rupture, Evolve, Fire Breathing, Feel No Pain,
-  Dark Embrace, Rage, Flame Barrier, Double Tap, Sentinel (on exhaust), the
-  colorless powers, and every curse (end-of-turn or in-hand triggers)
-
-**Generic mechanisms**, each built once:
-- **Card select:** see the list above.
-- **Play a card from the draw pile, or replay one.** Uses a small fixed
-  card queue: Havoc, Double Tap, Mayhem, Distilled Chaos, Duplication
-  Potion, Necronomicon.
-- **Random card from a pool table:** Infernal Blade, Jack of All Trades,
-  Chrysalis, Metamorphosis, Magnetism, Enchiridion, Dead Branch, Entropic
-  Brew.
-- **Per-slot cost overrides:** Snecko Eye and Snecko Oil, Madness,
-  Enlightenment, Corruption, Mummified Hand, Infernal Blade.
-
-**Relics.** About 75 matter in combat for Ironclad, and all fit
-counter-plus-hook:
-- Counters with a threshold: Pen Nib, Nunchaku, Kunai, Shuriken, Ornamental
-  Fan, Letter Opener, Ink Bottle, Happy Flower, Sundial, Incense Burner,
-  Art of War, Velvet-style energy relics, Stone Calendar, Horn Cleat,
-  Captain's Wheel, Mercury Hourglass.
-- Flat effects at combat start: Anchor, Bag of Marbles, Bag of Preparation,
-  Blood Vial, Bronze Scales, Oddly Smooth Stone, Vajra, Lantern, Thread and
-  Needle, Philosopher's Stone, Pantograph, Red Mask, Gremlin Visage,
-  Clockwork Souvenir, Fossilized Helix, Akabeko, Girya, Du-Vu Doll,
-  Mutagenic Strength.
-- Damage pipeline: Paper Phrog, The Boot, Torii, Tungsten Rod, Strike Dummy,
-  Champion Belt.
-- Conditional: Red Skull, Self-Forming Clay, Centennial Puzzle, Runic Cube,
-  Magic Flower, Charon's Ashes, Lizard Tail, Unceasing Top, Ice Cream,
-  Runic Pyramid, Orichalcum, Calipers, Brimstone, Mark of Pain.
-- Random or choice (they use the generic mechanisms): Mummified Hand,
-  Warped Tongs, Gambling Chip, Toolbox, Enchiridion, Dead Branch, Nilry's
-  Codex, Strange Spoon, Snecko Eye, Bottled Flame/Lightning/Tornado,
-  Necronomicon.
-
-**Estimated opcode count for full scope: about 35–45.** Each opcode is a
-primitive with table parameters, not one per card.
+```
+src/jaxsim/api.py        contract: Env, EnvSpec, StartSpec, Obs, Outcome, CONTRACT, ids, error bits
+src/jaxsim/start.py      host-side StartSpec builders
+src/jaxsim/_core/        private implementation (state, init, step, observe, cards, champ, piles, choice)
+tests/test_contract.py   every promise in api.py
+tools/gen_ids.py         id generation and check
+bench/bench_step.py      random-policy throughput
+```
 
 ## Validation
 
-The C++ simulator is the oracle. Planned approach:
-1. Export a `BattleContext` into JAX state.
-2. Apply one decision on both sides.
-3. Compare the resulting states.
-4. Cover RNG-sensitive steps with distributional tests.
-5. Check fight-level outcome distributions under a fixed policy.
+The C++ comparison harness (issue #3) works like this:
+1. Export the C++ state.
+2. Apply the same action on both sides, injecting the C++'s random outcomes into JAX.
+3. Compare the resulting states field by field.
 
-Bit-exact RNG isn't needed for RL.
+## Roadmap
 
-## Measurements
-
-See README.md.
+1. #3 C++ comparison harness.
+2. #4 Count-based core with the PR #2 card set and the Champ.
+3. sts-ml#10 on-device self-play loop.
+4. #5 full card pool.
+5. #6 relics and potions.
