@@ -29,6 +29,11 @@ JA_VULN, JA_WEAK, JA_FRAIL = 1, 2, 4
 F32 = jnp.float32
 
 
+def is_attack(move):
+    """Monster::isAttacking for The Champ's moves (isMoveAttack)."""
+    return (move == HEAVY_SLASH) | (move == FACE_SLAP) | (move == EXECUTE)
+
+
 def roll(s: State, r) -> State:
     """getMoveForRoll: e_move is the move just taken (lastMove), e_last the one before (lastMoveBefore)."""
     last, before = s.e_move, s.e_last

@@ -11,7 +11,8 @@ _MS = {n: i for i, n in enumerate(api.MONSTER_STATUS_NAMES)}
 def observe(spec: api.EnvSpec, s: State) -> api.Obs:
     ps = jnp.zeros((spec.n_player_status,), I16)
     for name, v in (("STRENGTH", s.p_str), ("DEXTERITY", s.p_dex), ("VULNERABLE", s.p_vuln),
-                    ("WEAK", s.p_weak), ("FRAIL", s.p_frail)):
+                    ("WEAK", s.p_weak), ("FRAIL", s.p_frail), ("LOSE_STRENGTH", s.p_lose_str),
+                    ("NO_DRAW", s.p_no_draw)):
         ps = ps.at[_PS[name]].set(v)
     es = jnp.zeros((spec.n_monster_status,), I16)
     for name, v in (("STRENGTH", s.e_str), ("VULNERABLE", s.e_vuln), ("WEAK", s.e_weak),

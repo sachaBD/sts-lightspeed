@@ -22,18 +22,25 @@ def identity(c) -> tuple[int, int]:
     return CARD[ids.CARDS_CPP[c[0]]], c[1]
 
 
-def slot_of(obs, ident) -> int:
+def slot_of(obs, ident, new: dict | None = None) -> int:
+    """jaxsim slot of a card identity. An identity created during the step has no slot in `obs` yet; with `new`
+    it gets the next empty slot, as piles.find_or_alloc assigns them."""
     card, up = ident
     hit = np.flatnonzero((np.asarray(obs.slot_card) == card) & (np.asarray(obs.slot_upgraded) == up))
-    if len(hit) != 1:
-        raise KeyError(f"no unique slot for {jaxsim.CARD_NAMES[card]}+{up}")
-    return int(hit[0])
+    if len(hit) == 1:
+        return int(hit[0])
+    if len(hit) == 0 and new is not None:
+        if ident not in new:
+            empty = np.flatnonzero(np.asarray(obs.slot_card) == 0)
+            new[ident] = int(empty[len(new)])
+        return new[ident]
+    raise KeyError(f"no unique slot for {jaxsim.CARD_NAMES[card]}+{up}")
 
 
-def slot_counts(obs, cards, D) -> np.ndarray:
+def slot_counts(obs, cards, D, new: dict | None = None) -> np.ndarray:
     out = np.zeros(D, np.int32)
     for ident, n in Counter(identity(c) for c in cards).items():
-        out[slot_of(obs, ident)] += n
+        out[slot_of(obs, ident, new)] += n
     return out
 
 
