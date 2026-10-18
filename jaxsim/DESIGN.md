@@ -13,6 +13,11 @@ The C++ simulator in this repo is the trusted reference.
 - The boundary exists only while JAX traces the code, so it costs nothing at runtime: the play library's
   jitted loop traces straight through `Env` functions.
 
+## Game settings
+
+- Ascension 20 only.
+- Bottled cards are out of scope.
+
 ## Core decisions
 
 1. **Pure functions, one game each.** `step(state, action, key) -> state`. Callers use `vmap` and `jit`.
@@ -30,7 +35,7 @@ The C++ simulator in this repo is the trusted reference.
    - Action d plays one copy of card slot d, or picks one during a choice.
    - Then END_TURN, P potion actions and DONE. A = D + P + 2 = 55.
    - Potions are identity slots with counts too, so two Fire Potions are one action. Potion capacity
-     (2 / 3 / 5) is a separate field.
+     (2 at A20, 4 with Potion Belt) is a separate field.
    - About 3–12 actions are legal at a time. Masked actions get zero prior in mctx, so the width costs only
      memory.
 5. **Choices pick from one pile row with a filter.**

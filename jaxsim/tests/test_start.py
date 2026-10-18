@@ -21,15 +21,15 @@ def test_bad_input_raises(kw):
 
 
 def test_identical_potions_share_a_slot():
-    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION", "FIRE_POTION", "BLOCK_POTION"])
+    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION", "FIRE_POTION", "BLOCK_POTION"], potion_capacity=3)
     assert np.asarray(s.potion_count).tolist()[:3] == [1, 2, 0]
     assert int(s.potion_capacity) == 3
-    assert int(jaxsim.make_start(["BASH"], hp=10, ascension=11).potion_capacity) == 2
+    assert int(jaxsim.make_start(["BASH"], hp=10).potion_capacity) == 2
 
 
 def test_potions_over_capacity_raise():
     with pytest.raises(ValueError):
-        jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"] * 3, ascension=11)
+        jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"] * 3)
 
 
 def test_too_many_distinct_cards():

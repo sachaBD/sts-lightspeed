@@ -28,9 +28,9 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key) -> State:
         p_status=z(spec.n_player_status),
         relics=start.relics.astype(I16), relic_ctr=z(spec.R), potions=start.potions.astype(I16),
         potion_n=start.potion_count.astype(I16), potion_cap=start.potion_capacity.astype(I16),
-        e_hp=I16(420), e_max_hp=I16(420), e_block=I16(0),  # TODO(champ): hp roll + ascension
+        e_hp=I16(420), e_max_hp=I16(420), e_block=I16(0),  # TODO(champ): A20 hp roll
         e_move=I16(0), e_last=I16(0), e_prev=I16(0), e_phase2=jnp.bool_(False), e_stances=I16(0),
         e_status=z(spec.n_monster_status),
-        choice=z(spec.CHOICE), turn=I16(0), ascension=start.ascension.astype(I16),
+        choice=z(spec.CHOICE), turn=I16(0),
         done=~valid, won=jnp.bool_(False), truncated=~valid, error=err,
     )

@@ -43,7 +43,6 @@ class State(NamedTuple):
     # flow
     choice: jax.Array         # [CHOICE]
     turn: jax.Array
-    ascension: jax.Array
     done: jax.Array           # bool
     won: jax.Array            # bool
     truncated: jax.Array      # bool
