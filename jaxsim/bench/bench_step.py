@@ -8,7 +8,8 @@ import jax.numpy as jnp
 import jaxsim
 
 STEPS = 256
-DECK = ["STRIKE_RED"] * 5 + ["DEFEND_RED"] * 4 + ["BASH"]
+DECK = ["STRIKE_RED"] * 5 + ["DEFEND_RED"] * 4 + ["BASH", "ASCENDERS_BANE", "POMMEL_STRIKE", "SHRUG_IT_OFF",
+        "INFLAME", "TWIN_STRIKE", "IRON_WAVE", "ANGER", "WILD_STRIKE"]
 
 
 def make_runner(env, batch):

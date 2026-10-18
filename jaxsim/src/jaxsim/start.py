@@ -38,21 +38,25 @@ def make_start(
     relics: Sequence[str] = (),
     potions: Sequence[str] = (),
     potion_capacity: int | None = None,
-    ascension: int = 0,
+    allow_unsupported: bool = False,
     spec: api.EnvSpec = api.DEFAULT_SPEC,
 ) -> api.StartSpec:
     """deck: card names ("STRIKE_RED") or (name, upgraded) pairs. Identical cards share one slot, as do
-    identical potions. potion_capacity defaults to 3 (2 at ascension 11+); pass 5 for Potion Belt."""
+    identical potions. potion_capacity defaults to 2 (ascension 20); pass 4 for Potion Belt."""
     counts = Counter((c, 0) if isinstance(c, str) else (c[0], int(c[1])) for c in deck)
     if len(counts) > spec.D:
         raise ValueError(f"deck has {len(counts)} distinct cards, more than D={spec.D}")
     potion_counts = Counter(potions)
     if potion_capacity is None:
-        potion_capacity = 3 if ascension < 11 else 2
+        potion_capacity = 2
     if len(relics) > spec.R or len(potion_counts) > spec.P or len(potions) > potion_capacity:
         raise ValueError("too many relics or potions")
     if not 0 <= potion_capacity <= spec.P:
         raise ValueError(f"bad potion_capacity {potion_capacity}")
+    if not allow_unsupported:
+        missing = sorted({n for n, _ in counts if n not in supported_cards()} | set(potions))
+        if missing:
+            raise ValueError(f"not implemented yet: {missing} (supported cards: jaxsim.supported_cards())")
     max_hp = hp if max_hp is None else max_hp
     if not 0 < hp <= max_hp:
         raise ValueError(f"bad hp {hp}/{max_hp}")
@@ -70,7 +74,14 @@ def make_start(
         pot[i], pot_n[i] = _id(_POTION, name, "potion"), n
     i16 = lambda x: jnp.asarray(x, jnp.int16)
     return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), relics=i16(rel),
-                         potions=i16(pot), potion_count=i16(pot_n), potion_capacity=i16(potion_capacity), hp=i16(hp), max_hp=i16(max_hp), ascension=i16(ascension))
+                         potions=i16(pot), potion_count=i16(pot_n), potion_capacity=i16(potion_capacity), hp=i16(hp), max_hp=i16(max_hp))
+
+
+def supported_cards() -> tuple[str, ...]:
+    """Card names jaxsim implements. Potions: none yet."""
+    from jaxsim._core.tables import cards
+
+    return cards.SUPPORTED_NAMES
 
 
 def stack_starts(starts: Sequence[api.StartSpec]) -> api.StartSpec:

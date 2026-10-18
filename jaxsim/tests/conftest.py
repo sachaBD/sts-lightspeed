@@ -3,7 +3,7 @@ import pytest
 
 import jaxsim
 
-IRONCLAD_STARTER = ["STRIKE_RED"] * 5 + ["DEFEND_RED"] * 4 + ["BASH"]
+IRONCLAD_STARTER = ["STRIKE_RED"] * 5 + ["DEFEND_RED"] * 4 + ["BASH", "ASCENDERS_BANE"]
 
 
 @pytest.fixture(scope="session")
@@ -13,7 +13,7 @@ def env():
 
 @pytest.fixture(scope="session")
 def start():
-    return jaxsim.make_start(IRONCLAD_STARTER, hp=80, relics=["BURNING_BLOOD"], potions=["FIRE_POTION"] * 2)
+    return jaxsim.make_start(IRONCLAD_STARTER, hp=80, relics=["BURNING_BLOOD"])
 
 
 @pytest.fixture

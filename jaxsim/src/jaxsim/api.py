@@ -34,6 +34,8 @@ Semantics (enforced by tests/test_contract.py):
   game with `truncated=True`.
 * **Rewards belong to the consumer.** The env reports `Outcome`; it never computes a reward.
 
+Game settings: ascension 20 only (The Champ's A20 numbers, 2 potion slots). Bottled cards are out of scope.
+
 Ids (card, relic, potion, move, statuses) are generated from the C++ enums: 0 = NONE, then the C++ names in
 order. They are part of the contract. Changing anything in this file, the id tables, or observation semantics
 requires bumping `CONTRACT`.
@@ -145,10 +147,9 @@ class StartSpec(NamedTuple):
     relics: jax.Array      # [R] relic ids, 0 = empty
     potions: jax.Array     # [P] potion ids, distinct, 0 = empty
     potion_count: jax.Array  # [P] copies held per potion slot
-    potion_capacity: jax.Array  # [] potion slots the player has (2 / 3 / 5); sum(potion_count) <= capacity
+    potion_capacity: jax.Array  # [] potion slots the player has (2 at A20, 4 with Potion Belt); sum(potion_count) <= capacity
     hp: jax.Array          # []
     max_hp: jax.Array      # []
-    ascension: jax.Array   # []
 
 
 class Obs(NamedTuple):
@@ -166,7 +167,8 @@ class Obs(NamedTuple):
     known_top: jax.Array       # [K_TOP] slot ids on top of the draw pile, top first; -1 = unknown
     player: jax.Array          # [4] hp, max_hp, block, energy
     player_status: jax.Array   # [n_player_status] amount per status id
-    enemy: jax.Array           # [4] hp, max_hp, block, intent move id
+    enemy: jax.Array           # [6] hp, max_hp, block, intent move id, previous move id, AI state
+                               #     (Champ AI state: defensive stances used + 4 * phase 2)
     enemy_status: jax.Array    # [n_monster_status] amount per status id
     relics: jax.Array          # [R] relic ids
     relic_counters: jax.Array  # [R] per-relic counter (Pen Nib, Nunchaku, ...), 0 if none
