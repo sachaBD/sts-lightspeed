@@ -67,7 +67,7 @@ def expected(state, obs, D) -> dict:
         es[MS[ids.MONSTER_STATUS_CPP[cpp]]] = v
     return {
         "piles": np.stack([slot_counts(obs, state[name], D) for name in PILES]),
-        "player": np.array([p["hp"], p["max_hp"], p["block"], p["energy"]]),
+        "player": np.array([p["hp"], p["max_hp"], p["block"], p["energy"], p["energy_per_turn"]]),
         "player_status": ps,
         "enemy": np.array([e["hp"], e["max_hp"], e["block"], MOVE[ids.MOVES_CPP[e["move"]]],
                            MOVE[ids.MOVES_CPP[e["last"]]], e["misc"]]),

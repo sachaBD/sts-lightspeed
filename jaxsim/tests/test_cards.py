@@ -153,3 +153,65 @@ def test_sever_soul_kill_leaves_non_attacks_in_hand():
     env = jaxsim.make_env()
     s = _play(env, _hand_of(env, ["SEVER_SOUL", "DEFEND_RED"], e_hp=5, energy=3), "SEVER_SOUL")
     assert env.outcome(s).won and int(env.observe(s).piles[api.PILE_HAND, _slot(s, "DEFEND_RED")]) == 1
+
+
+def _end_turn(env, s):
+    return env.step(s, jnp.int32(env.spec.END_TURN), jax.random.key(3))
+
+
+def test_flame_barrier_retaliates_per_hit_and_can_win_on_the_champs_turn():
+    env = jaxsim.make_env()
+    from jaxsim._core import champ
+    s = _hand_of(env, ["STRIKE_RED"], block=50)._replace(e_move=I16(champ.EXECUTE), p_flame_barrier=I16(4), e_hp=I16(6))
+    s = _end_turn(env, s)
+    out = env.outcome(s)
+    assert out.won and int(env.observe(s).enemy[0]) == 0          # 4 after hit 1, dead after hit 2
+
+
+def test_juggernaut_hits_per_block_gain():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["DEFEND_RED"], p_juggernaut=5), "DEFEND_RED")
+    assert int(env.observe(s).enemy[0]) == 440 - 5
+
+
+def test_rupture_strength_comes_after_hemokinesis_damage():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["HEMOKINESIS"], p_rupture=2), "HEMOKINESIS")
+    o = env.observe(s)
+    assert int(o.enemy[0]) == 440 - 15 and int(o.player_status[jaxsim.PLAYER_STATUS_NAMES.index("STRENGTH")]) == 2
+
+
+def test_corruption_frees_and_exhausts_skills_with_feel_no_pain_and_dark_embrace():
+    env = jaxsim.make_env()
+    s = _hand_of(env, ["CORRUPTION", "SHRUG_IT_OFF", "STRIKE_RED"], energy=3, p_fnp=3)
+    s = _play(env, s, "CORRUPTION")
+    assert int(env.observe(s).slot_cost[_slot(s, "SHRUG_IT_OFF")]) == 0
+    s = _play(env, s._replace(energy=I16(0)), "SHRUG_IT_OFF")
+    o = env.observe(s)
+    assert int(o.piles[api.PILE_EXHAUST, _slot(s, "SHRUG_IT_OFF")]) == 1 and int(o.player[2]) == 8 + 3
+
+
+def test_barricade_keeps_block_and_berserk_adds_energy():
+    env = jaxsim.make_env()
+    from jaxsim._core import champ
+    s = _hand_of(env, ["STRIKE_RED"], block=30, p_barricade=1, p_energy_per_turn=4)._replace(e_move=I16(champ.GLOAT))
+    s = _end_turn(env, s)
+    o = env.observe(s)
+    assert int(o.player[2]) == 30 and int(o.player[3]) == 4 and int(o.player[4]) == 4
+
+
+def test_combust_and_metallicize_at_end_of_turn():
+    env = jaxsim.make_env()
+    from jaxsim._core import champ
+    s = _hand_of(env, ["STRIKE_RED"], p_combust=5, p_combust_hp=1, p_metallicize=3)._replace(e_move=I16(champ.GLOAT))
+    s = _end_turn(env, s)
+    o = env.observe(s)
+    assert int(o.enemy[0]) == 440 - 5 and int(o.player[0]) == 80 - 1
+
+
+def test_brutality_upgraded_is_innate():
+    env = jaxsim.make_env()
+    deck = [("BRUTALITY", 1)] + ["STRIKE_RED"] * 20
+    for k in range(5):
+        s = env.init(jaxsim.make_start(deck, hp=80), jax.random.key(k))
+        assert int(env.observe(s).piles[api.PILE_HAND, _slot(s, "BRUTALITY")]) == 1

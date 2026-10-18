@@ -25,8 +25,14 @@ TO_DRAW, TO_DISCARD, TO_HAND = 1, 2, 3
 COLUMNS = ("supported", "cost", "type", "playable", "ethereal", "exhausts",
            "hp_loss", "block", "damage", "hits", "e_vuln", "e_weak", "e_str", "p_str", "lose_str", "energy", "draw",
            "copy_to_discard", "create_card", "create_pile", "create_n", "eot_damage", "special", "special_amt",
-           "is_strike", "blood_cost", "exhaust_energy")
+           "is_strike", "blood_cost", "exhaust_energy", "power", "power_amt", "innate")
 _COL = {c: i for i, c in enumerate(COLUMNS)}
+
+# power column: which player power a card adds power_amt to (BARRICADE / CORRUPTION are flags set to 1;
+# BERSERK raises energy per turn by 1 and applies power_amt Vulnerable to the player)
+POWERS = ("none", "metallicize", "demon_form", "barricade", "brutality", "combust", "corruption", "dark_embrace",
+          "evolve", "fnp", "fire_breathing", "juggernaut", "rage", "rupture", "flame_barrier", "berserk")
+PW = {p: i for i, p in enumerate(POWERS)}
 
 _ID = {n: i for i, n in enumerate(ids.CARDS)}
 W, DAZED, BURN = _ID["WOUND"], _ID["DAZED"], _ID["BURN"]
@@ -92,6 +98,23 @@ _ROWS = {
     "SEVER_SOUL":       (dict(cost=2, type=ATTACK, damage=16, special=SP_SEVER_SOUL), dict(damage=22)),
     "SECOND_WIND":      (dict(cost=1, type=SKILL, block=5, special=SP_SECOND_WIND), dict(block=7)),
     "FIEND_FIRE":       (dict(cost=2, type=ATTACK, damage=7, special=SP_FIEND_FIRE, exhausts=1), dict(damage=10)),
+    # batch 3: powers and hooks
+    "METALLICIZE":     (dict(cost=1, type=POWER, power=PW["metallicize"], power_amt=3), dict(power_amt=4)),
+    "DEMON_FORM":      (dict(cost=3, type=POWER, power=PW["demon_form"], power_amt=2), dict(power_amt=3)),
+    "BARRICADE":       (dict(cost=3, type=POWER, power=PW["barricade"], power_amt=1), dict(cost=2)),
+    "BERSERK":         (dict(cost=0, type=POWER, power=PW["berserk"], power_amt=2), dict(power_amt=1)),
+    "BRUTALITY":       (dict(cost=0, type=POWER, power=PW["brutality"], power_amt=1), dict(innate=1)),
+    "COMBUST":         (dict(cost=1, type=POWER, power=PW["combust"], power_amt=5), dict(power_amt=7)),
+    "CORRUPTION":      (dict(cost=3, type=POWER, power=PW["corruption"], power_amt=1), dict(cost=2)),
+    "DARK_EMBRACE":    (dict(cost=2, type=POWER, power=PW["dark_embrace"], power_amt=1), dict(cost=1)),
+    "EVOLVE":          (dict(cost=1, type=POWER, power=PW["evolve"], power_amt=1), dict(power_amt=2)),
+    "FEEL_NO_PAIN":    (dict(cost=1, type=POWER, power=PW["fnp"], power_amt=3), dict(power_amt=4)),
+    "FIRE_BREATHING":  (dict(cost=1, type=POWER, power=PW["fire_breathing"], power_amt=6), dict(power_amt=10)),
+    "JUGGERNAUT":      (dict(cost=2, type=POWER, power=PW["juggernaut"], power_amt=5), dict(power_amt=7)),
+    "RUPTURE":         (dict(cost=1, type=POWER, power=PW["rupture"], power_amt=1), dict(power_amt=2)),
+    "RAGE":            (dict(cost=0, type=SKILL, power=PW["rage"], power_amt=3), dict(power_amt=5)),
+    "FLAME_BARRIER":   (dict(cost=2, type=SKILL, block=12, power=PW["flame_barrier"], power_amt=4),
+                        dict(block=16, power_amt=6)),
     # statuses and curses
     "WOUND":           (dict(cost=-2, type=STATUS, playable=0), {}),
     "DAZED":           (dict(cost=-2, type=STATUS, playable=0, ethereal=1), {}),

@@ -34,7 +34,7 @@ def test_potions_over_capacity_raise():
 
 
 def test_unsupported_rejected():
-    for kw in (dict(deck=["DEMON_FORM"]), dict(deck=["BASH"], potions=["FIRE_POTION"])):
+    for kw in (dict(deck=["HAVOC"]), dict(deck=["BASH"], potions=["FIRE_POTION"])):
         with pytest.raises(ValueError, match="not implemented"):
             jaxsim.make_start(hp=10, **kw)
 

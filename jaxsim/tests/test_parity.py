@@ -19,7 +19,7 @@ from tests.oracle.client import BINARY, Oracle
 pytestmark = pytest.mark.skipif(not BINARY.exists(), reason="oracle not built (tools/build_oracle.sh)")
 
 SPEC = jaxsim.DEFAULT_SPEC
-FIGHTS = 200
+FIGHTS = 300
 _init = jax.jit(lambda start, key, forced: core_init.init(SPEC, start, key, forced))
 _step = jax.jit(lambda s, a, key, forced: core_step.step(SPEC, s, a, key, forced))
 KEY = jax.random.key(0)
@@ -63,18 +63,39 @@ def random_deck(rng: random.Random):
 def choose(rng, fight, legal, obs):
     """Even fights: uniform random. Odd fights: play cards before ending the turn, preferring attacks and
     strong decks, so fights reach the Champ's phase 2 and wins."""
-    if fight % 2 == 0 or len(legal) == 1:
+    if (fight % 2 == 0 and fight % 3 != 2) or len(legal) == 1:
         return rng.choice(sorted(legal))
     cards = [a for a in legal if a != SPEC.END_TURN]
     return rng.choice(cards)
 
 
+POWER_MIX = ["METALLICIZE", "DEMON_FORM", "BARRICADE", "BERSERK", "BRUTALITY", "COMBUST", "CORRUPTION",
+             "DARK_EMBRACE", "EVOLVE", "FEEL_NO_PAIN", "FIRE_BREATHING", "JUGGERNAUT", "RUPTURE", "RAGE",
+             "FLAME_BARRIER"]
+HOOK_FUEL = ["SECOND_WIND", "FIEND_FIRE", "SEVER_SOUL", "GHOSTLY_ARMOR", "CARNAGE", "WILD_STRIKE", "POWER_THROUGH",
+             "IMMOLATE", "RECKLESS_CHARGE", "OFFERING", "HEMOKINESIS", "SENTINEL", "SHRUG_IT_OFF", "BLOOD_FOR_BLOOD"]
+
+
 def fight_setup(rng, fight):
     deck, hp = random_deck(rng), rng.randint(30, 80)
+    if fight % 3 == 2:  # powers and the cards that trigger them, long fights
+        deck += [(rng.choice(POWER_MIX), rng.randint(0, 1)) for _ in range(rng.randint(2, 5))]
+        deck += [(rng.choice(HOOK_FUEL), rng.randint(0, 1)) for _ in range(rng.randint(2, 6))]
+        return deck, 250
     if fight % 2:
         deck += [(c, 1) for c in ["INFLAME", "TWIN_STRIKE", "POMMEL_STRIKE", "SHRUG_IT_OFF"] * rng.randint(1, 3)]
         hp = 300  # long fights: reach phase 2, Execute and wins
     return deck, hp
+
+
+def played_exhausts(obs, a):
+    """One-hot of the played card if it exhausts itself (its own flag, or a skill under Corruption)."""
+    from jaxsim._core.tables import cards as tc
+    row = tc.TABLE[int(obs.slot_card[a]), min(int(obs.slot_upgraded[a]), 1)]
+    corruption = int(obs.player_status[jaxsim.PLAYER_STATUS_NAMES.index("CORRUPTION")]) > 0
+    out = np.zeros(SPEC.D, np.int32)
+    out[a] = int(row[tc.col("exhausts")] == 1 or (corruption and row[tc.col("type")] == tc.SKILL))
+    return out
 
 
 def created_in_hand(obs, a, hand_size):
@@ -102,7 +123,16 @@ def roll_of(resp):
 
 def check(resp, s, where):
     obs, out = jaxsim.make_env().observe(s), jaxsim.make_env().outcome(s)
-    bad = convert.diff(convert.expected(resp["state"], obs, SPEC.D), convert.actual(obs, out))
+    exp, act = convert.expected(resp["state"], obs, SPEC.D), convert.actual(obs, out)
+    if exp["done"]:  # after the fight ends only the result matters (leftover queued effects are not modelled)
+        exp = {"done": exp["done"], "won": exp["won"], "player": exp["player"][:2]}
+        act = {k: act[k] for k in ("done", "won")} | {"player": act["player"][:2]}
+    bad = convert.diff(exp, act)
+    if bad:
+        slots = [f"{d}:{jaxsim.CARD_NAMES[int(obs.slot_card[d])]}+{int(obs.slot_upgraded[d])}"
+                 f"/c{int(obs.slot_cost[d])}/m{int(obs.slot_misc[d])}" for d in range(SPEC.D) if int(obs.slot_card[d])]
+        bad.append("slots: " + " ".join(slots))
+        bad.append("c++ player: " + str(resp["state"]["player"]))
     assert not bad, f"{where}:\n  " + "\n  ".join(bad)
     assert int(out.error) == 0, f"{where}: error bits {int(out.error)}"
     if not out.done:
@@ -130,13 +160,18 @@ def test_random_fight(fight):
             legal = convert.legal_actions(resp["actions"], obs, SPEC)
             a = choose(rng, fight, legal, obs)
             before = np.asarray(obs.piles)[1].astype(np.int32)
+            exh_before = np.asarray(obs.piles)[3].astype(np.int32)
             resp = oracle.step(legal[a])
-            after = convert.slot_counts(obs, resp["state"]["hand"], SPEC.D, new={}, ignore_cost=True)
+            new = {}
+            after = convert.slot_counts(obs, resp["state"]["hand"], SPEC.D, new=new, ignore_cost=True)
             if a == SPEC.END_TURN:
                 drawn = after
             else:
                 rest = before.copy()
                 rest[a] -= 1
+                # cards exhausted from hand this step (Second Wind, Fiend Fire, Sever Soul), not the played card
+                exh_after = convert.slot_counts(obs, resp["state"]["exhaust"], SPEC.D, new=new, ignore_cost=True)
+                rest -= exh_after - exh_before - played_exhausts(obs, a)
                 drawn = after - rest
                 drawn -= created_in_hand(obs, a, rest.sum())
             s = _step(s, jnp.int32(a), KEY, forced(np.maximum(drawn, 0), roll_of(resp)))

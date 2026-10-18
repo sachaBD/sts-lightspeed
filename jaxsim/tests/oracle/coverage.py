@@ -23,7 +23,7 @@ def main():
             p2 |= bool(st["enemy"]["misc"] & 4)
             cards = [a for a in r["actions"] if a["type"] == convert.ACTION_CARD]
             end = [a for a in r["actions"] if a["type"] == convert.ACTION_END_TURN]
-            pool = cards if (fight % 2 and cards) else cards + end
+            pool = cards if ((fight % 2 or fight % 3 == 2) and cards) else cards + end
             a = rng.choice(pool)
             if a["type"] == convert.ACTION_CARD:
                 played[ids.CARDS_CPP[a["card"][0]]] += 1

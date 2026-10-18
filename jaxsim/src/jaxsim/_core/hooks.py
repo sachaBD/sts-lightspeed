@@ -1,0 +1,73 @@
+"""Shared event helpers: block gain, damage to the enemy, hp loss, exhaust triggers.
+
+Every helper takes `go` (bool): the event only happens if the fight is still going when it would. After the
+fight ends nothing changes the outcome (a dead player cannot win and vice versa).
+"""
+import jax.numpy as jnp
+
+from jaxsim._core.state import I16, I32, State
+from jaxsim._core.tables import cards as tc
+
+i16 = lambda x: jnp.asarray(x).astype(I16)
+
+
+def gain_block(s: State, amount, go):
+    """Player::gainBlock: returns (state, Juggernaut events: 1 if block was gained)."""
+    ev = (amount > 0) & go
+    return s._replace(block=i16(s.block + jnp.where(ev, amount, 0))), ev.astype(I32)
+
+
+def hurt_enemy(s: State, damage, go) -> State:
+    """Monster::damage / attacked with already-calculated damage: block absorbs, then hp; may win."""
+    damage = jnp.where(go, damage, 0)
+    blocked = jnp.minimum(s.e_block.astype(I32), damage)
+    e_hp = s.e_hp - (damage - blocked)
+    won = go & (e_hp <= 0)
+    return s._replace(e_block=i16(s.e_block - blocked), e_hp=i16(jnp.maximum(e_hp, 0)), won=s.won | won,
+                      done=s.done | won)
+
+
+def juggernaut(s: State, events) -> State:
+    """Juggernaut deals its amount per block-gain event (each one a separate DamageRandomEnemy)."""
+    return hurt_enemy(s, events * s.p_juggernaut.astype(I32), ~s.done & (s.p_juggernaut > 0))
+
+
+def blood_events(s: State, events) -> State:
+    """CardInstance::tookDamage on every hp-loss event: Blood for Blood costs 1 less (not below 0)."""
+    from jaxsim._core import cards
+    blood = cards.rows(s)[:, tc.col("blood_cost")] == 1
+    cost = jnp.where(blood, jnp.maximum(s.slot_cost - events, 0), s.slot_cost)
+    return s._replace(slot_cost=cost.astype(I16))
+
+
+def lose_hp(s: State, amount, self_damage, go, events=1) -> State:
+    """Player::hpWasLost for `amount` (> 0) already past block, as `events` separate losses: Rupture per self
+    damage loss, Blood for Blood per loss, death."""
+    lost = go & (amount > 0)
+    events = jnp.where(lost, events, 0)
+    hp = s.hp - jnp.where(lost, amount, 0)
+    died = lost & (hp <= 0)
+    s = s._replace(hp=i16(jnp.maximum(hp, 0)), done=s.done | died,
+                   p_str=i16(s.p_str + jnp.where(self_damage, events * s.p_rupture, 0)))
+    return blood_events(s, events)
+
+
+def damage_player_hits(s: State, per, k, self_damage, go) -> State:
+    """k separate Player::damage hits of `per` (Burns): block absorbs first; hit i loses hp iff i * per > block."""
+    k = jnp.where(go, k, 0)
+    total = per * k
+    blocked = jnp.minimum(s.block.astype(I32), total)
+    events = jnp.where(per > 0, k - jnp.minimum(k, s.block.astype(I32) // jnp.maximum(per, 1)), 0)
+    s = s._replace(block=i16(s.block - blocked))
+    return lose_hp(s, total - blocked, self_damage, go & (k > 0), events)
+
+
+def on_exhaust(s: State, n, sentinel_energy, go):
+    """triggerAndMoveToExhaustPile for n cards: Sentinel energy (immediate), Feel No Pain block per card,
+    Dark Embrace draws per card. Returns (state, Juggernaut events, cards to draw later)."""
+    n = jnp.where(go, n, 0)
+    s = s._replace(energy=i16(s.energy + jnp.where(go, sentinel_energy, 0)))
+    fnp = s.p_fnp.astype(I32)
+    s = s._replace(block=i16(s.block + n * fnp))
+    jugg = jnp.where(fnp > 0, n, 0)
+    return s, jugg, n * s.p_dark_embrace.astype(I32)

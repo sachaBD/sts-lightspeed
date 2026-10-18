@@ -69,34 +69,36 @@ def _debuff_player(s: State, field: str, bit: int, amount) -> State:
 
 
 def take_turn(s: State, r) -> State:
-    i16 = lambda x: jnp.asarray(x).astype(I16)
+    """The Champ's move, hit by hit: block absorbs, hp loss (Blood for Blood), Flame Barrier hits back after
+    each hit. Nothing more happens once the fight is over."""
+    from jaxsim._core import hooks
+    i16 = hooks.i16
     m = s.e_move
-    s = s._replace(e_block=I16(0))
+    s = s._replace(e_block=jnp.where(s.done, s.e_block, I16(0)))
     base = jnp.select([m == HEAVY_SLASH, m == FACE_SLAP, m == EXECUTE], [HEAVY_SLASH_DMG, FACE_SLAP_DMG, EXECUTE_DMG], 0)
     hits = jnp.select([m == EXECUTE, base > 0], [EXECUTE_HITS, 1], 0)
     per = monster_damage(s, base)
-    total = per * hits
-    blocked = jnp.minimum(s.block.astype(I32), total)
-    hp = s.hp - (total - blocked)
-    # hp-loss events (Blood for Blood): hits landing after the block is used up
-    events = jnp.where(per > 0, jnp.maximum(hits - s.block.astype(I32) // jnp.maximum(per, 1), 0), 0)
-    from jaxsim._core import cards
-    s = cards.blood_events(s, jnp.where(total > blocked, events, 0))
-    died = hp <= 0
-    s = s._replace(block=i16(s.block - blocked), hp=i16(jnp.maximum(hp, 0)), done=s.done | died)
-    at_death = s  # the C++ stops the moment the player dies: no debuffs, no roll
-    slap, taunt = m == FACE_SLAP, m == TAUNT
+    for h in range(EXECUTE_HITS):
+        hit = ~s.done & (h < hits)
+        blocked = jnp.minimum(s.block.astype(I32), jnp.where(hit, per, 0))
+        s = s._replace(block=i16(s.block - blocked))
+        s = hooks.lose_hp(s, jnp.where(hit, per - blocked, 0), False, hit)
+        s = hooks.hurt_enemy(s, s.p_flame_barrier.astype(I32), hit & ~s.done & (s.p_flame_barrier > 0))
+    go = ~s.done
+    slap, taunt = (m == FACE_SLAP) & go, (m == TAUNT) & go
     s = _debuff_player(s, "p_frail", JA_FRAIL, jnp.where(slap, 2, 0))
     s = _debuff_player(s, "p_vuln", JA_VULN, jnp.where(slap | taunt, 2, 0))
     s = _debuff_player(s, "p_weak", JA_WEAK, jnp.where(taunt, 2, 0))
-    anger = m == ANGER
+    anger = (m == ANGER) & go
     e_str = jnp.where(anger, jnp.maximum(s.e_str, 0), s.e_str)
-    e_str = e_str + jnp.select([anger, m == GLOAT], [ANGER_STR, GLOAT_STR], 0)
-    stance = m == DEFENSIVE_STANCE
+    e_str = e_str + jnp.select([anger, (m == GLOAT) & go], [ANGER_STR, GLOAT_STR], 0)
+    stance = (m == DEFENSIVE_STANCE) & go
     s = s._replace(e_str=i16(e_str), e_vuln=i16(jnp.where(anger, 0, s.e_vuln)), e_weak=i16(jnp.where(anger, 0, s.e_weak)),
                    e_block=i16(s.e_block + jnp.where(stance, STANCE_BLOCK, 0)),
                    e_metallicize=i16(s.e_metallicize + jnp.where(stance, STANCE_METALLICIZE, 0)))
-    return tree_where(died, at_death, roll(s, r))
+    rolled = roll(s, r)
+    return s._replace(e_move=jnp.where(go, rolled.e_move, s.e_move), e_last=jnp.where(go, rolled.e_last, s.e_last),
+                      e_ai=jnp.where(go, rolled.e_ai, s.e_ai))
 
 
 def end_of_round(s: State) -> State:

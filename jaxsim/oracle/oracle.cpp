@@ -43,7 +43,13 @@ Json state_json(const BattleContext& bc) {
     for (int s = 1; s <= static_cast<int>(PlayerStatus::THE_BOMB); ++s) {  // INVALID = 0 ... THE_BOMB = last
         const auto ps = static_cast<PlayerStatus>(s);
         if (ps == PlayerStatus::THE_BOMB) continue;  // stored as bomb1..3 counters, not via getStatusRuntime
-        if (const int v = bc.player.getStatusRuntime(ps); v != 0) p_status.push_back({s, v});
+        if (!bc.player.hasStatusRuntime(ps) && s != static_cast<int>(PlayerStatus::STRENGTH)
+            && s != static_cast<int>(PlayerStatus::DEXTERITY) && s != static_cast<int>(PlayerStatus::ARTIFACT)) continue;
+        // flag statuses (Barricade) have no map entry: report 1
+        const auto it = bc.player.statusMap.find(ps);
+        const bool counted = it != bc.player.statusMap.end() || s == static_cast<int>(PlayerStatus::STRENGTH)
+            || s == static_cast<int>(PlayerStatus::DEXTERITY) || s == static_cast<int>(PlayerStatus::ARTIFACT);
+        if (const int v = counted ? bc.player.getStatusRuntime(ps) : 1; v != 0) p_status.push_back({s, v});
     }
     Json relics = Json::array();
     for (int r = 0; r < 128; ++r)  // relic bits cover battle relics only (ids < 128)
@@ -62,7 +68,7 @@ Json state_json(const BattleContext& bc) {
         {"outcome", static_cast<int>(bc.outcome)},
         {"turn", bc.turn},
         {"player", {{"hp", bc.player.curHp}, {"max_hp", bc.player.maxHp}, {"block", bc.player.block},
-                    {"energy", bc.player.energy}, {"status", p_status}}},
+                    {"energy", bc.player.energy}, {"energy_per_turn", bc.player.energyPerTurn}, {"status", p_status}}},
         {"relics", relics},
         {"potions", potions},
         {"potion_capacity", bc.potionCapacity},

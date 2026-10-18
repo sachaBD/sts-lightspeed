@@ -23,8 +23,11 @@ def find_or_alloc(s: State, card, up, cost, misc):
 
 
 def _draw_one(spec: api.EnvSpec, s: State, active, key, forced):
+    """Draw one card. Returns (state, forced, drawn card type or -1)."""
+    from jaxsim._core import cards
     piles = s.piles.astype(I32)
     draw, disc, hand = piles[api.PILE_DRAW], piles[api.PILE_DISCARD], piles[api.PILE_HAND]
+    active = active & ~s.done & (s.p_no_draw == 0)
     shuffle = active & (draw.sum() == 0) & (disc.sum() > 0)
     draw = jnp.where(shuffle, draw + disc, draw)
     disc = jnp.where(shuffle, 0, disc)
@@ -33,18 +36,38 @@ def _draw_one(spec: api.EnvSpec, s: State, active, key, forced):
         r = jax.random.randint(key, (), 0, jnp.maximum(draw.sum(), 1))
         slot = jnp.sum(jnp.cumsum(draw) <= r)
     else:
+        # statuses first, so on-draw triggers (Evolve) extend the draw as far as the C++ outcome needs
         avail = (forced.draw > 0) & (draw > 0)
+        status = cards.TABLE[s.slot_card.astype(I32), 0, cards.C("type")] == cards.tc.STATUS
         ok = ok & jnp.any(avail)
-        slot = jnp.argmax(avail)
+        slot = jnp.where(jnp.any(avail & status), jnp.argmax(avail & status), jnp.argmax(avail))
         forced = forced._replace(draw=forced.draw - ((jnp.arange(spec.D) == slot) & ok))
     take = ((jnp.arange(spec.D) == slot) & ok).astype(I32)
     piles = piles.at[api.PILE_DRAW].set(draw - take).at[api.PILE_DISCARD].set(disc).at[api.PILE_HAND].set(hand + take)
-    return s._replace(piles=piles.astype(I16)), forced
+    ctype = cards.TABLE[s.slot_card[slot].astype(I32), 0, cards.C("type")]
+    return s._replace(piles=piles.astype(I16)), forced, jnp.where(ok, ctype, -1)
 
 
-def draw(spec: api.EnvSpec, s: State, n, key, forced, max_n: int):
-    """Draw n (traced, <= max_n) cards one at a time; stops at an empty draw+discard or a full hand."""
+def draw(spec: api.EnvSpec, s: State, n, key, forced, max_n: int, extend: bool):
+    """Draw n (traced) cards one at a time, up to max_n; stops at an empty draw+discard, a full hand, No Draw or
+    the end of the fight. On-draw triggers (CardManager::draw): a Status queues Evolve draws, a Status or Curse
+    makes Fire Breathing damage the enemy. extend: Evolve draws continue this draw; otherwise they are returned
+    for a later draw. Returns (state, forced, Evolve draws not yet done)."""
+    from jaxsim._core import hooks
+    from jaxsim._core.tables import cards as tc
     keys = jax.random.split(key, max_n)
+    n = jnp.asarray(n, I32)
+    extra = jnp.zeros((), I32)
     for i in range(max_n):
-        s, forced = _draw_one(spec, s, i < n, keys[i], forced)
-    return s, forced
+        s, forced, ctype = _draw_one(spec, s, i < n, keys[i], forced)
+        status = ctype == tc.STATUS
+        evolve = jnp.where(status, s.p_evolve.astype(I32), 0)
+        if extend:
+            n = n + evolve
+        else:
+            extra = extra + evolve
+        s = hooks.hurt_enemy(s, s.p_fire_breathing.astype(I32),
+                             (status | (ctype == tc.CURSE)) & (s.p_fire_breathing > 0) & ~s.done)
+    if extend:
+        extra = jnp.maximum(n - max_n, 0) * 0
+    return s, forced, extra

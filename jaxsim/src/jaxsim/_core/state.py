@@ -34,6 +34,23 @@ class State(NamedTuple):
     p_ja: jax.Array           # just-applied bits for monster-sourced debuffs: 1 vuln, 2 weak, 4 frail
     p_lose_str: jax.Array     # Flex: strength lost at end of turn
     p_no_draw: jax.Array      # Battle Trance: no more draws this turn (stacks, like the C++ status)
+    p_energy_per_turn: jax.Array  # 3, +1 per Berserk
+    # powers (amounts as the C++ statuses; combust_hp = Combust cards played, the C++ combustHpLoss)
+    p_metallicize: jax.Array
+    p_demon_form: jax.Array
+    p_barricade: jax.Array
+    p_brutality: jax.Array
+    p_combust: jax.Array
+    p_combust_hp: jax.Array
+    p_corruption: jax.Array
+    p_dark_embrace: jax.Array
+    p_evolve: jax.Array
+    p_fnp: jax.Array
+    p_fire_breathing: jax.Array
+    p_juggernaut: jax.Array
+    p_rage: jax.Array
+    p_rupture: jax.Array
+    p_flame_barrier: jax.Array
     relics: jax.Array         # [R] ids (observation only for now)
     relic_ctr: jax.Array      # [R]
     potions: jax.Array        # [P] ids
