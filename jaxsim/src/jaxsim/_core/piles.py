@@ -12,7 +12,7 @@ from jaxsim._core.state import I16, I32, U32, State
 
 MAX_PILE = 128      # card copies in draw + discard that a draw can reach (more sets ERR_QUEUE_OVERFLOW)
 MAX_DRAW = 10       # cards per draw: the hand holds at most 10
-EVOLVE_ROUNDS = 3   # a draw plus up to two rounds of Evolve draws triggered by statuses drawn
+EVOLVE_ROUNDS = 10  # a draw plus up to 9 Evolve rounds: each round adds >= 1 card and the hand holds 10
 
 
 def find_or_alloc(s: State, card, up, cost, misc, want=True):
