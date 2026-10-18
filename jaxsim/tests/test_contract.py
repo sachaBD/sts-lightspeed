@@ -23,7 +23,7 @@ def random_rollout(env, s, key, n):
 
 
 def test_contract_version():
-    assert jaxsim.CONTRACT == "jaxsim_champ_v1"
+    assert jaxsim.CONTRACT == "jaxsim_champ_v2"
 
 
 def test_action_layout(env):

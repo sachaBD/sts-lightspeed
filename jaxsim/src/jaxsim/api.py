@@ -49,7 +49,7 @@ import jax
 
 from jaxsim._core.tables import ids as _ids
 
-CONTRACT = "jaxsim_champ_v1"
+CONTRACT = "jaxsim_champ_v2"  # v2: Obs.player gains energy per turn
 
 __all__ = [
     "CONTRACT", "EnvSpec", "DEFAULT_SPEC", "StartSpec", "Obs", "Outcome", "Env", "make_env",
