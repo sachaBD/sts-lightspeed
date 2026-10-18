@@ -2,15 +2,26 @@
 import jax.numpy as jnp
 
 from jaxsim import api
-from jaxsim._core.state import State
+from jaxsim._core.state import I16, State
+
+_PS = {n: i for i, n in enumerate(api.PLAYER_STATUS_NAMES)}
+_MS = {n: i for i, n in enumerate(api.MONSTER_STATUS_NAMES)}
 
 
 def observe(spec: api.EnvSpec, s: State) -> api.Obs:
+    ps = jnp.zeros((spec.n_player_status,), I16)
+    for name, v in (("STRENGTH", s.p_str), ("DEXTERITY", s.p_dex), ("VULNERABLE", s.p_vuln),
+                    ("WEAK", s.p_weak), ("FRAIL", s.p_frail)):
+        ps = ps.at[_PS[name]].set(v)
+    es = jnp.zeros((spec.n_monster_status,), I16)
+    for name, v in (("STRENGTH", s.e_str), ("VULNERABLE", s.e_vuln), ("WEAK", s.e_weak),
+                    ("METALLICIZE", s.e_metallicize)):
+        es = es.at[_MS[name]].set(v)
     return api.Obs(
         slot_card=s.slot_card, slot_upgraded=s.slot_up, slot_cost=s.slot_cost, slot_misc=s.slot_misc,
         piles=s.piles, known_top=s.known_top,
-        player=jnp.stack([s.hp, s.max_hp, s.block, s.energy]), player_status=s.p_status,
-        enemy=jnp.stack([s.e_hp, s.e_max_hp, s.e_block, s.e_move]), enemy_status=s.e_status,
+        player=jnp.stack([s.hp, s.max_hp, s.block, s.energy]), player_status=ps,
+        enemy=jnp.stack([s.e_hp, s.e_max_hp, s.e_block, s.e_move, s.e_last, s.e_ai]), enemy_status=es,
         relics=s.relics, relic_counters=s.relic_ctr, potions=s.potions,
         potion_counts=s.potion_n, potion_capacity=s.potion_cap, choice=s.choice, turn=s.turn,
     )

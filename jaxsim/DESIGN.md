@@ -80,10 +80,40 @@ bench/bench_step.py      random-policy throughput
 
 ## Validation
 
-The C++ comparison harness (issue #3) works like this:
-1. Export the C++ state.
-2. Apply the same action on both sides, injecting the C++'s random outcomes into JAX.
-3. Compare the resulting states field by field.
+`tests/test_parity.py` plays 200 random-deck fights against the C++ simulator (the `jaxsim_oracle` process,
+built by `tools/build_oracle.sh`) and compares every step: piles, player, enemy, statuses, turn, outcome and
+the legal-action set.
+- The C++'s random outcomes are injected into JAX through the private forced path (`_core/rand.py`):
+  - drawn cards: the hand difference before and after;
+  - Champ rolls: replayed from a copy of `aiRng`.
+- Half the fights use a uniform random policy. The other half always play cards and start at 300 HP, so they
+  reach phase 2, Execute and wins.
+- Coverage: `uv run python -m tests.oracle.coverage`.
+
+C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
+- Iron Wave's block goes through `calculateCardBlock` twice, so Dexterity and Frail apply twice.
+- A monster's debuff on the player is "just applied" (skips that round's decrement) only if the player didn't
+  already have it.
+- When a card wins the fight, its later effects are skipped (Bash's Vulnerable, Anger's copy, draws), but the
+  card itself still goes to the discard pile.
+- When the player dies during the Champ's turn, everything stops there: no debuffs, no roll, no end of round.
+
+## Supported content
+
+- Cards: Strike, Defend, Bash, Pommel Strike, Shrug It Off, Inflame, Twin Strike, Iron Wave, Anger, Wild Strike,
+  Wound and Ascender's Bane, upgraded and unupgraded.
+- No relic effects and no potions yet. Relics are carried in the observation only.
+- `jaxsim.supported_cards()` lists the cards. `make_start` rejects anything else.
+
+## Measurements
+
+Random policy, `bench/bench_step.py`, MacBook Air CPU:
+
+| Batch | Decisions/s | Fights/s |
+|---|---|---|
+| 1024 | 429k | 18.3k |
+| 4096 | 444k | 19.0k |
+| 16384 | 428k | 18.4k |
 
 ## Roadmap
 

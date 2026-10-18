@@ -6,8 +6,8 @@ the neural network and this simulator all run inside one compiled GPU program.
 
 The C++ simulator in this repository is the reference. jaxsim is tested against it.
 
-**Status:** skeleton. The interface and tests are final. The game rules are not implemented yet: the only
-legal action is ending the turn.
+**Status:** the core game works and matches the C++ simulator exactly on 200 random fights. It supports A20
+Champ fights with 12 cards (see `jaxsim.supported_cards()`). Relics and potions are not implemented yet.
 
 ## How it fits together
 
@@ -65,7 +65,8 @@ Details and the reasons behind them: [DESIGN.md](DESIGN.md). Out-of-scope conten
 ```
 uv sync                          # Python 3.12 + JAX (CPU)
 uv sync --extra cuda             # NVIDIA GPU
-uv run pytest                    # contract tests
+uv run pytest                    # contract + parity tests (parity needs the oracle)
+tools/build_oracle.sh            # build the C++ oracle (macOS: may need SDKROOT=.../MacOSX26.5.sdk)
 uv run python bench/bench_step.py 4096
 uv run python tools/gen_ids.py   # regenerate ids after C++ enum changes
 ```

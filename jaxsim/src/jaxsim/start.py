@@ -38,6 +38,7 @@ def make_start(
     relics: Sequence[str] = (),
     potions: Sequence[str] = (),
     potion_capacity: int | None = None,
+    allow_unsupported: bool = False,
     spec: api.EnvSpec = api.DEFAULT_SPEC,
 ) -> api.StartSpec:
     """deck: card names ("STRIKE_RED") or (name, upgraded) pairs. Identical cards share one slot, as do
@@ -52,6 +53,10 @@ def make_start(
         raise ValueError("too many relics or potions")
     if not 0 <= potion_capacity <= spec.P:
         raise ValueError(f"bad potion_capacity {potion_capacity}")
+    if not allow_unsupported:
+        missing = sorted({n for n, _ in counts if n not in supported_cards()} | set(potions))
+        if missing:
+            raise ValueError(f"not implemented yet: {missing} (supported cards: jaxsim.supported_cards())")
     max_hp = hp if max_hp is None else max_hp
     if not 0 < hp <= max_hp:
         raise ValueError(f"bad hp {hp}/{max_hp}")
@@ -70,6 +75,13 @@ def make_start(
     i16 = lambda x: jnp.asarray(x, jnp.int16)
     return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), relics=i16(rel),
                          potions=i16(pot), potion_count=i16(pot_n), potion_capacity=i16(potion_capacity), hp=i16(hp), max_hp=i16(max_hp))
+
+
+def supported_cards() -> tuple[str, ...]:
+    """Card names jaxsim implements. Potions: none yet."""
+    from jaxsim._core.tables import cards
+
+    return cards.SUPPORTED_NAMES
 
 
 def stack_starts(starts: Sequence[api.StartSpec]) -> api.StartSpec:

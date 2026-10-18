@@ -39,7 +39,7 @@ def test_shapes_and_dtypes(env, start, key):
     assert m.shape == (sp.A,) and m.dtype == jnp.bool_
     expect = dict(slot_card=(sp.D,), slot_upgraded=(sp.D,), slot_cost=(sp.D,), slot_misc=(sp.D,),
                   piles=(api.NUM_PILES, sp.D), known_top=(sp.K_TOP,), player=(4,),
-                  player_status=(sp.n_player_status,), enemy=(4,), enemy_status=(sp.n_monster_status,),
+                  player_status=(sp.n_player_status,), enemy=(6,), enemy_status=(sp.n_monster_status,),
                   relics=(sp.R,), relic_counters=(sp.R,), potions=(sp.P,), potion_counts=(sp.P,), potion_capacity=(), choice=(sp.CHOICE,), turn=())
     assert set(expect) == set(o._fields)
     for f, shape in expect.items():
@@ -62,7 +62,7 @@ def test_invalid_start_flags_error(env, start, key):
     bads = [
         start._replace(count=start.count.at[-1].set(3)),                     # count on an empty card slot
         start._replace(potion_count=start.potion_count.at[-1].set(1)),       # count on an empty potion slot
-        start._replace(potion_capacity=jnp.int16(0)),                        # more potions than capacity
+        start._replace(potions=start.potions.at[0].set(1), potion_count=start.potion_count.at[0].set(3)),  # > capacity
     ]
     for bad in bads:
         out = env.outcome(env.init(bad, key))
@@ -114,8 +114,17 @@ def test_terminal_is_absorbing(env, start, key):
     assert trees_equal(env.step(st, jnp.int32(env.spec.END_TURN), key), st)
 
 
-def test_truncation_is_not_a_loss(env, start, key):
+def test_unsupported_flags_error(env, key):
+    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"], allow_unsupported=True)
+    out = env.outcome(env.init(s, key))
+    assert out.done and out.truncated and int(out.error) & api.ERR_UNSUPPORTED
+
+
+def test_truncation_is_not_a_loss(start, key):
+    env = jaxsim.make_env(jaxsim.EnvSpec(max_turns=2))
     s = env.init(start, key)
-    states = random_rollout(env, s, key, env.spec.max_turns + 5)
+    states = [s]
+    for _ in range(3):
+        states.append(env.step(states[-1], jnp.int32(env.spec.END_TURN), key))
     out = env.outcome(states[-1])
     assert out.done and out.truncated and not out.won and int(out.error) == 0

@@ -167,7 +167,8 @@ class Obs(NamedTuple):
     known_top: jax.Array       # [K_TOP] slot ids on top of the draw pile, top first; -1 = unknown
     player: jax.Array          # [4] hp, max_hp, block, energy
     player_status: jax.Array   # [n_player_status] amount per status id
-    enemy: jax.Array           # [4] hp, max_hp, block, intent move id
+    enemy: jax.Array           # [6] hp, max_hp, block, intent move id, previous move id, AI state
+                               #     (Champ AI state: defensive stances used + 4 * phase 2)
     enemy_status: jax.Array    # [n_monster_status] amount per status id
     relics: jax.Array          # [R] relic ids
     relic_counters: jax.Array  # [R] per-relic counter (Pen Nib, Nunchaku, ...), 0 if none

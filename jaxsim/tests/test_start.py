@@ -21,7 +21,8 @@ def test_bad_input_raises(kw):
 
 
 def test_identical_potions_share_a_slot():
-    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION", "FIRE_POTION", "BLOCK_POTION"], potion_capacity=3)
+    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION", "FIRE_POTION", "BLOCK_POTION"], potion_capacity=3,
+                          allow_unsupported=True)
     assert np.asarray(s.potion_count).tolist()[:3] == [1, 2, 0]
     assert int(s.potion_capacity) == 3
     assert int(jaxsim.make_start(["BASH"], hp=10).potion_capacity) == 2
@@ -29,7 +30,13 @@ def test_identical_potions_share_a_slot():
 
 def test_potions_over_capacity_raise():
     with pytest.raises(ValueError):
-        jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"] * 3)
+        jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"] * 3, allow_unsupported=True)
+
+
+def test_unsupported_rejected():
+    for kw in (dict(deck=["DEMON_FORM"]), dict(deck=["BASH"], potions=["FIRE_POTION"])):
+        with pytest.raises(ValueError, match="not implemented"):
+            jaxsim.make_start(hp=10, **kw)
 
 
 def test_too_many_distinct_cards():
