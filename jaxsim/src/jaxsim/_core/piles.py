@@ -134,6 +134,11 @@ def draw_cards(spec: api.EnvSpec, s: State, n, key, forced, status_first=True):
         left = jnp.maximum(f - group.astype(I32) @ (d1 - t0 + d2), 0)
         forced = forced._replace(draw=jnp.where(first, left, 0).astype(forced.draw.dtype))
     shuffled = k2 > 0
+    # Sundial: every 3rd shuffle gives 2 energy
+    from jaxsim._core.tables import relics as tr
+    sun = s.rel[tr.ID["SUNDIAL"]] & shuffled
+    s = s._replace(r_sundial=jnp.where(sun, jnp.where(s.r_sundial == 2, 0, s.r_sundial + 1), s.r_sundial).astype(I16),
+                   energy=(s.energy + 2 * (sun & (s.r_sundial == 2))).astype(I16))
     gone = jnp.minimum(k, n_known)                            # known top cards drawn: forget them
     kt_new = jnp.where(gone >= 2, jnp.full_like(kt, -1), jnp.where(gone == 1, jnp.stack([kt[1], -1]), kt))
     s = s._replace(known_top=kt_new.astype(I16))

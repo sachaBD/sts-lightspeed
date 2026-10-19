@@ -44,17 +44,53 @@ def blood_events(s: State, events) -> State:
     return piles.retarget(s, move, s.slot_card, s.slot_up, jnp.maximum(s.slot_cost - events, 0), s.slot_misc)
 
 
+def _rel(s: State, name: str):
+    from jaxsim._core.tables import relics as tr
+    return s.rel[tr.ID[name]]
+
+
+def heal(s: State, amount, go) -> State:
+    """Player::heal: Mark of the Bloom blocks it, Magic Flower x1.5; Red Skull's Strength goes when healed above
+    half."""
+    from jaxsim._core import relics
+    amount = jnp.where(_rel(s, "MAGIC_FLOWER"), amount * 3 // 2, amount)
+    amount = jnp.where(go & ~_rel(s, "MARK_OF_THE_BLOOM"), amount, 0)
+    was_low = s.hp <= s.max_hp // 2
+    hp = jnp.minimum(s.hp + amount, s.max_hp)
+    s = s._replace(hp=i16(hp))
+    leaves_low = _rel(s, "RED_SKULL") & was_low & (hp > s.max_hp // 2) & (amount > 0)
+    return relics.debuff_player(s, "p_str", 0, jnp.where(leaves_low, -3, 0))
+
+
 def lose_hp(s: State, amount, self_damage, go, events=1) -> State:
-    """Player::loseHp / hpWasLost for `amount` (> 0) already past block, as `events` separate losses: Rupture per
-    self damage loss, Blood for Blood per loss, death. Intangible makes each loss 1."""
+    """Player::loseHp / hpWasLost for `amount` (> 0) already past block, as `events` separate losses.
+    Intangible makes each loss 1, Tungsten Rod takes 1 off each. Per loss: Rupture (self damage), Blood for Blood,
+    Self-Forming Clay, Runic Cube; the first loss of the combat: Centennial Puzzle; Red Skull when it drops to
+    half; death unless Lizard Tail (heals to half once). Draws from Runic Cube / Centennial Puzzle are done at the
+    next draw point."""
     amount = jnp.asarray(amount, I32)
+    events = jnp.asarray(events, I32)
     amount = jnp.where((s.p_intangible > 0) & (amount > 0), jnp.minimum(amount, events), amount)
+    rod = _rel(s, "TUNGSTEN_ROD")
+    amount = jnp.where(rod, jnp.maximum(amount - events, 0), amount)
     lost = go & (amount > 0)
     events = jnp.where(lost, events, 0)
+    was_low = s.hp <= s.max_hp // 2
     hp = s.hp - jnp.where(lost, amount, 0)
     died = lost & (hp <= 0)
-    s = s._replace(hp=i16(jnp.maximum(hp, 0)), done=s.done | died,
-                   p_str=i16(s.p_str + jnp.where(self_damage, events * s.p_rupture, 0)))
+    centennial = _rel(s, "CENTENNIAL_PUZZLE") & lost
+    from jaxsim._core.tables import relics as tr
+    s = s._replace(hp=i16(jnp.maximum(hp, 0)),
+                   p_str=i16(s.p_str + jnp.where(self_damage, events * s.p_rupture, 0)
+                             + 3 * (_rel(s, "RED_SKULL") & lost & ~was_low & (hp <= s.max_hp // 2))),
+                   p_next_turn_block=i16(s.p_next_turn_block + 3 * events * _rel(s, "SELF_FORMING_CLAY")),
+                   p_pending_draw=i16(s.p_pending_draw + events * _rel(s, "RUNIC_CUBE") + 3 * centennial),
+                   rel=s.rel.at[tr.ID["CENTENNIAL_PUZZLE"]].set(_rel(s, "CENTENNIAL_PUZZLE") & ~lost))
+    # Lizard Tail: instead of dying, heal to half max hp (once)
+    lizard = died & _rel(s, "LIZARD_TAIL")
+    s = s._replace(rel=s.rel.at[tr.ID["LIZARD_TAIL"]].set(_rel(s, "LIZARD_TAIL") & ~lizard))
+    s = heal(s, s.max_hp.astype(I32) // 2, lizard)
+    s = s._replace(done=s.done | (died & ~lizard))
     return blood_events(s, events)
 
 
@@ -80,6 +116,7 @@ def on_exhaust(s: State, n, sentinel_energy, go):
     Dark Embrace draws per card. Returns (state, Juggernaut events, cards to draw later)."""
     n = jnp.where(go, n, 0)
     s = s._replace(energy=i16(s.energy + jnp.where(go, sentinel_energy, 0)))
+    s = hurt_enemy(s, 3 * n * _rel(s, "CHARONS_ASHES"), go & (n > 0) & _rel(s, "CHARONS_ASHES"))   # Charon's Ashes
     fnp = s.p_fnp.astype(I32)
     s = s._replace(block=i16(s.block + n * fnp))
     jugg = jnp.where(fnp > 0, n, 0)

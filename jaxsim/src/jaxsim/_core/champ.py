@@ -89,6 +89,8 @@ def take_turn(s: State, r, jugg_late=0, fb_late=0) -> State:
         dmg = jnp.where(hit, per - blocked, 0)
         buffered = (dmg > 0) & (s.p_buffer > 0)                 # Player::attacked: Buffer, then Plated Armor
         dmg = jnp.where(buffered, 0, dmg)
+        from jaxsim._core import relics
+        dmg = jnp.where(relics.has(s, "TORII") & (dmg > 0) & (dmg <= 5), 1, dmg)   # Torii (Tungsten Rod: lose_hp)
         s = s._replace(p_buffer=i16(s.p_buffer - buffered), p_plated=i16(jnp.maximum(s.p_plated - (dmg > 0), 0)))
         s = hooks.lose_hp(s, dmg, False, hit)
         back = (s.p_thorns + s.p_flame_barrier).astype(I32)    # Thorns and Flame Barrier hit back per hit
