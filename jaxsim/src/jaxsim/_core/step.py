@@ -35,8 +35,10 @@ def legal_mask(spec: api.EnvSpec, s: State):
 def end_pre(spec: api.EnvSpec, s: State):
     """Up to the discard. Returns (state, Dark Embrace draws)."""
     r = cards.rows(s)
-    # Metallicize block (Juggernaut)
+    # Metallicize, then Plated Armor block (Juggernaut)
     s, jugg = hooks.gain_block(s, s.p_metallicize.astype(I32), ~s.done)
+    s, j_pl = hooks.gain_block(s, s.p_plated.astype(I32), ~s.done)
+    jugg = jugg + j_pl
     # end-of-turn cards in hand (Burn): blockable self damage, one hit per Burn
     hand = s.piles[api.PILE_HAND].astype(I32)
     burns = jnp.where(r[:, tc.col("eot_damage")] > 0, hand, 0)
@@ -53,7 +55,11 @@ def end_pre(spec: api.EnvSpec, s: State):
     s = hooks.lose_hp(s, s.p_combust_hp.astype(I32), True, ~s.done & (s.p_combust > 0))
     s = hooks.hurt_enemy(s, s.p_combust.astype(I32), ~s.done & (s.p_combust > 0))
     # end-of-turn powers: Flex's strength loss, No Draw and Rage expire
-    s = s._replace(p_str=i16(s.p_str - s.p_lose_str), p_lose_str=I16(0), p_no_draw=I16(0), p_rage=I16(0))
+    # (the strength loss is DebuffPlayer<STRENGTH>(-n): Artifact negates it)
+    from jaxsim._core import relics
+    lose = jnp.where(~s.done, s.p_lose_str.astype(I32), 0)
+    s = relics.debuff_player(s, "p_str", 0, -lose)
+    s = s._replace(p_lose_str=I16(0), p_no_draw=I16(0), p_rage=I16(0))
     # ethereal cards exhaust (with triggers), the rest of the hand is discarded
     s, _, j2, de = cards.exhaust_hand(s, r[:, tc.col("ethereal")] == 1, ~s.done)
     p = s.piles.astype(I32)
@@ -74,20 +80,24 @@ def end_mid(spec: api.EnvSpec, s: State, roll, jugg_late, fb_late):
     cap = go & (s.turn + 1 >= spec.max_turns)
     s = s._replace(
         e_block=w(nxt.e_block, s.e_block), e_vuln=w(nxt.e_vuln, s.e_vuln), e_weak=w(nxt.e_weak, s.e_weak),
+        e_ja=w(nxt.e_ja, s.e_ja),
         p_vuln=w(nxt.p_vuln, s.p_vuln), p_weak=w(nxt.p_weak, s.p_weak), p_frail=w(nxt.p_frail, s.p_frail),
         p_ja=w(nxt.p_ja, s.p_ja), turn=w(i16(s.turn + 1), s.turn),
         block=w(jnp.where(s.p_barricade > 0, s.block, I16(0)), s.block),
         p_flame_barrier=w(I16(0), s.p_flame_barrier), p_cards_played=w(I16(0), s.p_cards_played),
         p_intangible=w(nxt.p_intangible, s.p_intangible), done=s.done | cap, truncated=s.truncated | cap)
+    from jaxsim._core import relics
+    s, energy_bonus = relics.turn_start(s)
+    s = s._replace(p_attacks_played=jnp.where(go, I16(0), s.p_attacks_played))
     # Brutality: lose hp (not self damage) and draw, after the hand draw
     s = hooks.lose_hp(s, s.p_brutality.astype(I32), False, ~s.done & (s.p_brutality > 0))
-    return s, jnp.where(s.done, 0, HAND_DRAW + s.p_brutality.astype(I32))
+    return s, jnp.where(s.done, 0, HAND_DRAW + s.p_brutality.astype(I32)), energy_bonus
 
 
-def end_post(s: State, is_end) -> State:
+def end_post(s: State, is_end, energy_bonus) -> State:
     go = is_end & ~s.done
     return s._replace(p_str=i16(s.p_str + jnp.where(go, s.p_demon_form, 0)),
-                      energy=jnp.where(go, s.p_energy_per_turn, s.energy))
+                      energy=jnp.where(go, i16(s.p_energy_per_turn + energy_bonus), s.energy))
 
 
 def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
@@ -139,11 +149,11 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     evolve_later = jnp.where(pend_b, 0, evolve_later)
 
     left, trig2 = cards.play_post(spec, mid, limbo, jugg, ~pending)
-    turned, n_hand = end_mid(spec, mid, roll, jugg_late, fb_late)
+    turned, n_hand, energy_bonus = end_mid(spec, mid, roll, jugg_late, fb_late)
     mid = tree_where(is_end, turned, left)
     n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2)) + evolve_later
     mid, _, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
-    nxt = end_post(mid, is_end)
+    nxt = end_post(mid, is_end, energy_bonus)
 
     # the C++ can't-win rule (executeActions): no cards in hand, draw or discard and no damage without cards
     # (Combust, Juggernaut) is a loss

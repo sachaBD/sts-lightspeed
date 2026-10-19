@@ -252,3 +252,20 @@ def test_dual_wield_copies_and_exhume_returns_a_card():
     s = s._replace(piles=s.piles.at[api.PILE_EXHAUST, _slot(s, "STRIKE_RED")].set(1))
     s = _play(env, s, "EXHUME")
     assert int(env.observe(s).piles[api.PILE_HAND, _slot(s, "STRIKE_RED")]) == 2
+
+
+def test_relics_at_combat_start():
+    env = jaxsim.make_env()
+    start = jaxsim.make_start(["STRIKE_RED"] * 10, hp=50, max_hp=80,
+                              relics=["ANCHOR", "VAJRA", "LANTERN", "BLOOD_VIAL", ("GIRYA", 2), "SOZU"])
+    o = env.observe(env.init(start, jax.random.key(0)))
+    ps = {jaxsim.PLAYER_STATUS_NAMES[i]: int(o.player_status[i]) for i in np.flatnonzero(np.asarray(o.player_status))}
+    assert int(o.player[2]) == 10 and int(o.player[0]) == 52 and ps["STRENGTH"] == 3
+    assert int(o.player[3]) == 3 + 1 + 1 and int(o.player[4]) == 4    # Lantern this turn, Sozu every turn
+
+
+def test_velvet_choker_limits_plays_to_six():
+    env = jaxsim.make_env()
+    start = jaxsim.make_start(["ANGER"] * 3, hp=50, relics=["VELVET_CHOKER"])
+    s = env.init(start, jax.random.key(0))._replace(p_cards_played=I16(6))
+    assert not bool(env.legal_mask(s)[: env.spec.D].any())

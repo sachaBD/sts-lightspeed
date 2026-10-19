@@ -17,7 +17,8 @@ def observe(spec: api.EnvSpec, s: State) -> api.Obs:
                     ("CORRUPTION", s.p_corruption), ("DARK_EMBRACE", s.p_dark_embrace), ("EVOLVE", s.p_evolve),
                     ("FEEL_NO_PAIN", s.p_fnp), ("FIRE_BREATHING", s.p_fire_breathing),
                     ("JUGGERNAUT", s.p_juggernaut), ("RAGE", s.p_rage), ("RUPTURE", s.p_rupture),
-                    ("FLAME_BARRIER", s.p_flame_barrier), ("INTANGIBLE", s.p_intangible)):
+                    ("FLAME_BARRIER", s.p_flame_barrier), ("INTANGIBLE", s.p_intangible), ("ARTIFACT", s.p_artifact),
+                    ("BUFFER", s.p_buffer), ("THORNS", s.p_thorns), ("PLATED_ARMOR", s.p_plated)):
         ps = ps.at[_PS[name]].set(v)
     es = jnp.zeros((spec.n_monster_status,), I16)
     for name, v in (("STRENGTH", s.e_str), ("VULNERABLE", s.e_vuln), ("WEAK", s.e_weak),

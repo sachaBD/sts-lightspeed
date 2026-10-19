@@ -49,7 +49,7 @@ import jax
 
 from jaxsim._core.tables import ids as _ids
 
-CONTRACT = "jaxsim_champ_v3"  # v2: Obs.player gains energy per turn; v3: StartSpec.misc
+CONTRACT = "jaxsim_champ_v4"  # v2: Obs.player gains energy per turn; v3: StartSpec.misc; v4: relic data
 
 __all__ = [
     "CONTRACT", "EnvSpec", "DEFAULT_SPEC", "StartSpec", "Obs", "Outcome", "Env", "make_env",
@@ -146,6 +146,7 @@ class StartSpec(NamedTuple):
     count: jax.Array       # [D] copies in the deck
     misc: jax.Array        # [D] per-card value carried by the deck card (Ritual Dagger's damage), else 0
     relics: jax.Array      # [R] relic ids, 0 = empty
+    relic_data: jax.Array  # [R] the run's relic counter / value (Girya lifts, Du-Vu curses, Happy Flower, ...)
     potions: jax.Array     # [P] potion ids, distinct, 0 = empty
     potion_count: jax.Array  # [P] copies held per potion slot
     potion_capacity: jax.Array  # [] potion slots the player has (2 at A20, 4 with Potion Belt); sum(potion_count) <= capacity

@@ -17,7 +17,7 @@ _POTION = {n: i for i, n in enumerate(api.POTION_NAMES)}
 # Out of scope (DESIGN.md). Rejected here; anything else not yet implemented is flagged on device.
 OUT_OF_SCOPE = {
     "card": {"FORETHOUGHT"},
-    "relic": {"FROZEN_EYE", "RUNIC_DOME", "GREMLIN_HORN", "THE_SPECIMEN", "PRESERVED_INSECT", "SLING_OF_COURAGE"},
+    "relic": {"FROZEN_EYE", "RUNIC_DOME"},
     "potion": {"SMOKE_BOMB"},
 }
 
@@ -35,7 +35,7 @@ def make_start(
     *,
     hp: int,
     max_hp: int | None = None,
-    relics: Sequence[str] = (),
+    relics: Sequence[str | tuple[str, int]] = (),
     potions: Sequence[str] = (),
     potion_capacity: int | None = None,
     allow_unsupported: bool = False,
@@ -55,7 +55,10 @@ def make_start(
     if not 0 <= potion_capacity <= spec.P:
         raise ValueError(f"bad potion_capacity {potion_capacity}")
     if not allow_unsupported:
-        missing = sorted({n for n, _, _ in counts if n not in supported_cards()} | set(potions))
+        from jaxsim._core.tables import relics as tr
+        rel_names = [r if isinstance(r, str) else r[0] for r in relics]
+        missing = sorted({n for n, _, _ in counts if n not in supported_cards()} | set(potions)
+                         | {r for r in rel_names if r not in tr.SUPPORTED | tr.NO_EFFECT})
         if missing:
             raise ValueError(f"not implemented yet: {missing} (supported cards: jaxsim.supported_cards())")
     max_hp = hp if max_hp is None else max_hp
@@ -69,13 +72,16 @@ def make_start(
     for i, ((name, u, m), n) in enumerate(sorted(counts.items())):
         card[i], up[i], misc[i], count[i] = _id(_CARD, name, "card"), u, m, n
     rel = np.zeros(spec.R, np.int16)
-    rel[: len(relics)] = [_id(_RELIC, r, "relic") for r in relics]
+    rel_data = np.zeros(spec.R, np.int16)
+    for i, r in enumerate(relics):
+        name, data = (r, 0) if isinstance(r, str) else (r[0], int(r[1]))
+        rel[i], rel_data[i] = _id(_RELIC, name, "relic"), data
     pot = np.zeros(spec.P, np.int16)
     pot_n = np.zeros(spec.P, np.int16)
     for i, (name, n) in enumerate(sorted(potion_counts.items())):
         pot[i], pot_n[i] = _id(_POTION, name, "potion"), n
     i16 = lambda x: jnp.asarray(x, jnp.int16)
-    return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), misc=i16(misc), relics=i16(rel),
+    return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), misc=i16(misc), relics=i16(rel), relic_data=i16(rel_data),
                          potions=i16(pot), potion_count=i16(pot_n), potion_capacity=i16(potion_capacity), hp=i16(hp), max_hp=i16(max_hp))
 
 

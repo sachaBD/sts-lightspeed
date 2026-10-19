@@ -88,6 +88,17 @@ HOOK_FUEL = ["SECOND_WIND", "FIEND_FIRE", "BURNING_PACT", "TRUE_GRIT", "EXHUME",
              "IMMOLATE", "RECKLESS_CHARGE", "OFFERING", "HEMOKINESIS", "SENTINEL", "SHRUG_IT_OFF", "BLOOD_FOR_BLOOD"]
 
 
+RELIC_DATA = {"GIRYA": (0, 3), "DU_VU_DOLL": (0, 3), "HAPPY_FLOWER": (0, 2), "INCENSE_BURNER": (0, 5)}
+
+
+def random_relics(rng):
+    """0-5 relics: mostly ones with combat effects, sometimes a no-effect one; with run data where it matters."""
+    from jaxsim._core.tables import relics as tr
+    pool = sorted(tr.SUPPORTED) + sorted(tr.NO_EFFECT)[:5]
+    names = rng.sample(pool, rng.randint(0, 5))
+    return [(n, rng.randint(*RELIC_DATA[n])) if n in RELIC_DATA else (n, 0) for n in names]
+
+
 def fight_setup(rng, fight):
     deck, hp = random_deck(rng), rng.randint(30, 80)
     if fight % 3 == 2:  # powers and the cards that trigger them, long fights
@@ -149,8 +160,10 @@ def test_random_fight(fight):
     deck, hp = fight_setup(rng, fight)
     oracle = Oracle()
     try:
-        resp = oracle.start(seed=1000 + fight, hp=hp, max_hp=max(hp, 80), deck=convert.cpp_deck(deck))
-        start = jaxsim.make_start(deck, hp=hp, max_hp=max(hp, 80))
+        relics = random_relics(random.Random(10_000 + fight))
+        resp = oracle.start(seed=1000 + fight, hp=hp, max_hp=max(hp, 80), deck=convert.cpp_deck(deck),
+                            relics=convert.cpp_relics(relics))
+        start = jaxsim.make_start(deck, hp=hp, max_hp=max(hp, 80), relics=relics)
         obs0 = jaxsim.make_env().observe(core_init.init(SPEC, start, KEY))  # slot table only
         hand = convert.slot_counts(obs0, resp["drawn"], SPEC.D)
         s = _init(start, KEY, forced(hand, roll_of(resp)))

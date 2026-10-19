@@ -18,6 +18,8 @@ TABLE = jnp.asarray(tc.TABLE)
 F32 = jnp.float32
 C = tc.col
 i16 = hooks.i16
+from jaxsim._core.tables import relics as _tr
+_VELVET = _tr.ID["VELVET_CHOKER"]
 
 # power column -> state field (BARRICADE / CORRUPTION set a flag; BERSERK is handled separately)
 _ADD = {"metallicize": "p_metallicize", "demon_form": "p_demon_form", "brutality": "p_brutality",
@@ -49,6 +51,7 @@ def playable(s: State):
     clash_ok = (r[:, C("special")] != tc.SP_CLASH) | only_attacks
     affordable = (cost == -1) | ((cost >= 0) & (cost <= s.energy))   # -1 = X: always playable
     normality = jnp.any(hand & (r[:, C("normality")] == 1)) & (s.p_cards_played >= 3)
+    normality = normality | (s.rel[_VELVET] & (s.p_cards_played >= 6))
     return hand & (r[:, C("playable")] == 1) & affordable & clash_ok & ~normality
 
 
@@ -111,7 +114,8 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     cost = effective_cost(s, r, s.slot_cost[d].astype(I32))
     spent = jnp.where(cost == -1, x, cost)
     s = s._replace(energy=i16(s.energy - spent), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1),
-                   p_cards_played=i16(s.p_cards_played + 1))
+                   p_cards_played=i16(s.p_cards_played + 1),
+                   p_attacks_played=i16(s.p_attacks_played + (ctype == tc.ATTACK)))
     str_at_play = s.p_str                                               # damage is precomputed at play
     # Pain in hand: 1 hp per Pain, before the card resolves (addToTop in triggerOnOtherCardPlayed)
     pains = jnp.sum(jnp.where(rows(s)[:, C("pain")] == 1, s.piles[api.PILE_HAND].astype(I32), 0))
@@ -178,9 +182,11 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     p_str = jnp.where((sp == tc.SP_LIMIT_BREAK) & live, p_str * 2, p_str)
     s = s._replace(e_vuln=i16(s.e_vuln + r[C("e_vuln")] * live), e_weak=i16(s.e_weak + r[C("e_weak")] * live),
                    e_str=i16(s.e_str + r[C("e_str")] * live), p_str=i16(p_str),
-                   p_lose_str=i16(s.p_lose_str + r[C("lose_str")] * live),
+
                    energy=i16(s.energy + (r[C("energy")] + dropkick_bonus) * live),
                    p_intangible=i16(s.p_intangible + jnp.where((sp == tc.SP_INTANGIBLE) & live, r[C("special_amt")], 0)))
+    from jaxsim._core import relics
+    s = relics.debuff_player(s, "p_lose_str", 0, r[C("lose_str")] * live)    # Flex (Artifact negates it)
     s = _apply_power(s, r, live)
     # Rage: block after each attack's actions (after its choice, if it has one: see step.py)
     rage = (ctype == tc.ATTACK) & (r[C("choice")] == tc.CH_NONE)
@@ -201,12 +207,14 @@ def _apply_power(s: State, r, live) -> State:
     berserk = (pw == tc.PW["berserk"]) & live
     upd["p_combust_hp"] = i16(s.p_combust_hp + combust)
     upd["p_energy_per_turn"] = i16(s.p_energy_per_turn + berserk)
-    upd["p_vuln"] = i16(s.p_vuln + jnp.where(berserk, amt, 0))   # player-sourced: no just-applied
+
     # CardManager::onBuffCorruption: the first Corruption sets every skill's cost to 0 for the combat
     first_corruption = (pw == tc.PW["corruption"]) & live & (s.p_corruption == 0)
     skill = rows(s)[:, C("type")] == tc.SKILL
     upd["slot_cost"] = i16(jnp.where(first_corruption & skill & (s.slot_cost > 0), 0, s.slot_cost))
-    return s._replace(**upd)
+    s = s._replace(**upd)
+    from jaxsim._core import champ, relics
+    return relics.debuff_player(s, "p_vuln", champ.JA_VULN, jnp.where(berserk, amt, 0), monster_source=False)
 
 
 def play_post(spec: api.EnvSpec, s: State, d, jugg, active=True):

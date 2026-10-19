@@ -61,6 +61,11 @@ def cpp_deck(deck):
     return [[CPP_CARD[c], 0] if isinstance(c, str) else [CPP_CARD[c[0]], *c[1:]] for c in deck]
 
 
+def cpp_relics(relics):
+    """jaxsim relics [(name, data)] -> oracle relics [[cpp id, data]]."""
+    return [[CPP_RELIC[n], d] for n, d in relics]
+
+
 def expected(state, obs, D) -> dict:
     """The C++ state as the jaxsim observation fields it should equal."""
     p, e = state["player"], state["enemy"]

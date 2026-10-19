@@ -181,7 +181,10 @@ GameContext make_game(const Json& r) {
     gc.potionCount = 0;
     for (const auto& p : r.value("potions", Json::array())) gc.potions[gc.potionCount++] = static_cast<Potion>(p.get<int>());
     gc.relics = RelicContainer{};
-    for (const auto& id : r.value("relics", Json::array())) gc.relics.add({static_cast<RelicId>(id.get<int>()), 0});
+    for (const auto& rel : r.value("relics", Json::array())) {  // id or [id, data]
+        if (rel.is_array()) gc.relics.add({static_cast<RelicId>(rel.at(0).get<int>()), rel.at(1).get<int>()});
+        else gc.relics.add({static_cast<RelicId>(rel.get<int>()), 0});
+    }
     gc.deck = Deck{};
     for (const auto& c : r.at("deck")) {
         Card card{static_cast<CardId>(c.at(0).get<int>())};
