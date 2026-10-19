@@ -31,11 +31,15 @@
 ## How the parity harness works (`tests/test_parity.py`, `tests/oracle/`)
 - Random decks (3 kinds: uniform random play; card-first play at 300 HP; power-heavy at 250 HP). Random legal
   C++ actions are mapped to jaxsim slots. Every step: state fields + legal-action set compared.
-- JAX runs the **forced path**:
-  - drawn cards = C++ hand after − (hand before − played card − cards exhausted from hand − cards created
-    in hand);
-  - the Champ roll comes from replaying a copy of `aiRng`.
-- Forced draws take **statuses first** (their Evolve triggers decide how many more cards are drawn).
+- JAX runs the **forced path**. The oracle reports `drawn` and `exhausted` per request, tracked by card uid
+  (a card counts as drawn if it is in hand now and was in the draw/discard pile before, or it is the played or
+  limbo card or a Warcry pick that came back; after END_TURN every pre-existing card in hand). The Champ roll
+  comes from replaying a copy of `aiRng`.
+- Forced draws: known-top cards first (deterministic, no forced entry needed), then statuses first (Evolve), or
+  non-statuses first for the end-turn Dark Embrace draw (Fire Breathing timing). Forced counts match by card
+  group (card, upgrade, misc), so identity changes mid-step (Blood for Blood cost) don't break them.
+- `PARITY_DEBUG=1 uv run pytest -s ...` prints each select, the C++ hand/top of draw/enemy after each step, and
+  the pre-step JAX state.
 - Card identity mapping:
   - uses (card, upgraded, cost, misc); misc only for Rampage;
   - for the drawn-card computation, cost is ignored (it can change mid-step);

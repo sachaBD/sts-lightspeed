@@ -20,12 +20,16 @@ TO_DRAW, TO_DISCARD, TO_HAND = 1, 2, 3
 # special values: small dedicated rules, each a few masked scalar ops in cards.py
 (SP_NONE, SP_CLASH, SP_DROPKICK, SP_SPOT_WEAKNESS, SP_ENTRENCH, SP_LIMIT_BREAK, SP_FEED, SP_REAPER,
  SP_BATTLE_TRANCE, SP_HEAVY_BLADE, SP_PERFECTED_STRIKE, SP_BODY_SLAM, SP_WHIRLWIND, SP_SEARING_BLOW, SP_RAMPAGE,
- SP_SEVER_SOUL, SP_SECOND_WIND, SP_FIEND_FIRE) = range(18)
+ SP_SEVER_SOUL, SP_SECOND_WIND, SP_FIEND_FIRE, SP_UPGRADE_HAND, SP_RANDOM_EXHAUST) = range(20)
+
+# choice kinds (choice column): single picks from one pile, see _core/choice.py. Warcry's choice comes after its
+# own draws; every other choice comes before the card's draws.
+CH_NONE, CH_ARMAMENTS, CH_HEADBUTT, CH_EXHAUST_ONE, CH_WARCRY, CH_DUAL_WIELD, CH_EXHUME = range(7)
 
 COLUMNS = ("supported", "cost", "type", "playable", "ethereal", "exhausts",
            "hp_loss", "block", "damage", "hits", "e_vuln", "e_weak", "e_str", "p_str", "lose_str", "energy", "draw",
            "copy_to_discard", "create_card", "create_pile", "create_n", "eot_damage", "special", "special_amt",
-           "is_strike", "blood_cost", "exhaust_energy", "power", "power_amt", "innate")
+           "is_strike", "blood_cost", "exhaust_energy", "power", "power_amt", "innate", "choice")
 _COL = {c: i for i, c in enumerate(COLUMNS)}
 
 # power column: which player power a card adds power_amt to (BARRICADE / CORRUPTION are flags set to 1;
@@ -115,6 +119,16 @@ _ROWS = {
     "RAGE":            (dict(cost=0, type=SKILL, power=PW["rage"], power_amt=3), dict(power_amt=5)),
     "FLAME_BARRIER":   (dict(cost=2, type=SKILL, block=12, power=PW["flame_barrier"], power_amt=4),
                         dict(block=16, power_amt=6)),
+    # batch 4: choices
+    "ARMAMENTS":       (dict(cost=1, type=SKILL, block=5, choice=CH_ARMAMENTS),
+                        dict(choice=CH_NONE, special=SP_UPGRADE_HAND)),
+    "HEADBUTT":        (dict(cost=1, type=ATTACK, damage=9, choice=CH_HEADBUTT), dict(damage=12)),
+    "TRUE_GRIT":       (dict(cost=1, type=SKILL, block=7, special=SP_RANDOM_EXHAUST),
+                        dict(block=9, special=SP_NONE, choice=CH_EXHAUST_ONE)),
+    "WARCRY":          (dict(cost=0, type=SKILL, draw=1, choice=CH_WARCRY, exhausts=1), dict(draw=2)),
+    "BURNING_PACT":    (dict(cost=1, type=SKILL, draw=2, choice=CH_EXHAUST_ONE), dict(draw=3)),
+    "DUAL_WIELD":      (dict(cost=1, type=SKILL, choice=CH_DUAL_WIELD), {}),
+    "EXHUME":          (dict(cost=1, type=SKILL, choice=CH_EXHUME, exhausts=1), dict(cost=0)),
     # statuses and curses
     "WOUND":           (dict(cost=-2, type=STATUS, playable=0), {}),
     "DAZED":           (dict(cost=-2, type=STATUS, playable=0, ethereal=1), {}),

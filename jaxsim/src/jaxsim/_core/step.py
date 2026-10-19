@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 
 from jaxsim import api
-from jaxsim._core import cards, champ, hooks, piles
+from jaxsim._core import cards, champ, choice, hooks, piles
 from jaxsim._core.state import I16, I32, U32, State, tree_where
 from jaxsim._core.tables import cards as tc
 
@@ -25,9 +25,11 @@ i16 = hooks.i16
 
 
 def legal_mask(spec: api.EnvSpec, s: State):
-    mask = jnp.zeros((spec.A,), bool)
-    mask = mask.at[: spec.D].set(cards.playable(s) & ~s.done)
-    return mask.at[spec.END_TURN].set(True)
+    """Normal: playable cards and END_TURN. Choice pending: the valid picks only. Terminal: END_TURN only."""
+    pending = (s.choice[choice.KIND] > 0) & ~s.done
+    slots = jnp.where(pending, choice.pick_mask(s), cards.playable(s)) & ~s.done
+    mask = jnp.zeros((spec.A,), bool).at[: spec.D].set(slots)
+    return mask.at[spec.END_TURN].set(~pending)
 
 
 def end_pre(spec: api.EnvSpec, s: State):
@@ -50,13 +52,15 @@ def end_pre(spec: api.EnvSpec, s: State):
     p = s.piles.astype(I32)
     p = p.at[api.PILE_DISCARD].add(p[api.PILE_HAND]).at[api.PILE_HAND].set(0)
     s = s._replace(piles=p.astype(I16))
-    s = hooks.juggernaut(s, jugg + j2)
-    return s, de
+    s = hooks.juggernaut(s, jugg)
+    # Juggernaut from the ethereal-exhaust Feel No Pain block lands after the Champ's block reset (queued behind
+    # the monster turn start); carried into end_mid
+    return s, de, j2
 
 
-def end_mid(spec: api.EnvSpec, s: State, roll):
+def end_mid(spec: api.EnvSpec, s: State, roll, jugg_late, fb_late):
     """Champ turn, end of round, next turn start. Returns (state, cards to draw)."""
-    s = champ.take_turn(s, roll)
+    s = champ.take_turn(s, roll, jugg_late, fb_late)
     go = ~s.done
     nxt = champ.end_of_round(s)
     w = lambda new, old: jnp.where(go, new, old)
@@ -87,17 +91,58 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     k_a, k_b, k_roll = jax.random.split(key, 3)
     roll = jax.random.randint(k_roll, (), 0, 100) if forced is None else forced.roll
 
-    played, n_own, trig, jugg = cards.play_pre(spec, s, d)
-    ended, n_de = end_pre(spec, s)
-    mid = tree_where(is_end, ended, played)
-    mid, forced, evolve_later = piles.draw(spec, mid, jnp.where(is_end, n_de, n_own), k_a, forced, extend=False)
+    k_ex, k_a = jax.random.split(k_a)
+    pending0 = s.choice[choice.KIND] > 0
+    limbo0 = s.choice[choice.LIMBO].astype(I32)
+    kind = cards.row(s, d)[tc.col("choice")]
 
-    left, trig2 = cards.play_post(spec, mid, d, jugg)
-    turned, n_hand = end_mid(spec, mid, roll)
+    # play a card: effects, then a pre-draw choice (everything but Warcry) that may stay pending
+    played, n_own, trig, jugg = cards.play_pre(spec, s, d, k_ex, forced)
+    played, pend_a, jugg, trig = choice.choice_point(spec, played, jnp.where(kind != tc.CH_WARCRY, kind, 0), d,
+                                                     jugg, trig)
+    rage = lambda st, slot, go: hooks.gain_block(st, jnp.where(
+        go & (cards.row(s, slot)[tc.col("type")] == tc.ATTACK) & (cards.row(s, slot)[tc.col("choice")] != tc.CH_NONE),
+        st.p_rage.astype(I32), 0), ~st.done)
+    played, ev = rage(played, d, ~pend_a)   # Rage after an attack's resolved choice (Headbutt)
+    jugg = jugg + ev
+    # pick for a pending choice: its effect, then the rest of the card (Burning Pact draws after the pick)
+    picked, j_p, t_p = choice.apply_pick(spec, s, s.choice[choice.KIND].astype(I32), d, limbo0, ~s.done)
+    picked = picked._replace(choice=jnp.zeros_like(s.choice))
+    picked, ev_p = rage(picked, limbo0, True)
+    j_p = j_p + ev_p
+    lim_kind = s.choice[choice.KIND].astype(I32)
+    n_pick = jnp.where(lim_kind != tc.CH_WARCRY, cards.row(s, limbo0)[tc.col("draw")], 0)
+    acted = tree_where(pending0, picked, played)
+    jugg = jnp.where(pending0, s.choice[choice.JUGG] + j_p, jugg)
+    trig = jnp.where(pending0, s.choice[choice.TRIG] + t_p, trig)
+    n_a = jnp.where(pending0, n_pick, jnp.where(pend_a, 0, n_own))
+    limbo = jnp.where(pending0, limbo0, d)
+
+    ended, n_de, jugg_late = end_pre(spec, s)
+    mid = tree_where(is_end, ended, acted)
+    mid, forced, evolve_later, fb_late = piles.draw(spec, mid, jnp.where(is_end, n_de, n_a), k_a, forced,
+                                                    extend=False, fire_now=~is_end)
+    # Warcry's choice comes after its own draws
+    post_kind = jnp.where(~pending0 & ~pend_a & ~is_end & (kind == tc.CH_WARCRY), kind, 0)
+    # (a pending Warcry choice stores the Evolve draws its own draws triggered; they happen after the pick)
+    mid, pend_b, jugg, trig = choice.choice_point(spec, mid, post_kind, d, jugg, trig + evolve_later)
+    trig = trig - evolve_later
+    pending = ~pending0 & (pend_a | pend_b) & ~is_end
+    evolve_later = jnp.where(pend_b, 0, evolve_later)
+
+    left, trig2 = cards.play_post(spec, mid, limbo, jugg, ~pending)
+    turned, n_hand = end_mid(spec, mid, roll, jugg_late, fb_late)
     mid = tree_where(is_end, turned, left)
-    n_b = jnp.where(is_end, n_hand, trig + trig2) + evolve_later
-    mid, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
+    n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2)) + evolve_later
+    mid, _, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
     nxt = end_post(mid, is_end)
+
+    # the C++ can't-win rule (executeActions): no cards in hand, draw or discard and no damage without cards
+    # (Combust, Juggernaut) is a loss
+    p = nxt.piles.astype(I32)
+    no_cards = (p[api.PILE_HAND].sum() + p[api.PILE_DRAW].sum() + p[api.PILE_DISCARD].sum()) == 0
+    stuck = no_cards & ~nxt.done & (nxt.p_combust == 0) & (nxt.p_juggernaut == 0) & (nxt.choice[choice.KIND] == 0)
+    nxt = nxt._replace(done=nxt.done | stuck)
 
     # one full select: illegal actions and terminal states keep s; then patch flags
     take = ok & ~s.done

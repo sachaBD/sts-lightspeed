@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string>
 
 using Json = nlohmann::json;
@@ -83,6 +84,55 @@ Json state_json(const BattleContext& bc) {
     };
 }
 
+// The pile a single card select picks from (by task); nullptr for selects not over a pile.
+const CardInstance* select_source(const BattleContext& bc, int idx) {
+    const auto& cm = bc.cards;
+    switch (bc.cardSelectInfo.cardSelectTask) {
+        case CardSelectTask::ARMAMENTS: case CardSelectTask::EXHAUST_ONE: case CardSelectTask::WARCRY:
+        case CardSelectTask::DUAL_WIELD: case CardSelectTask::DISCARD_ONE:
+            return idx < cm.cardsInHand ? &cm.hand[idx] : nullptr;
+        case CardSelectTask::HEADBUTT: case CardSelectTask::LIQUID_MEMORIES_POTION:
+            return idx < static_cast<int>(cm.discardPile.size()) ? &cm.discardPile[idx] : nullptr;
+        case CardSelectTask::EXHUME:
+            return idx < static_cast<int>(cm.exhaustPile.size()) ? &cm.exhaustPile[idx] : nullptr;
+        default:
+            return nullptr;
+    }
+}
+
+std::set<int> uids(const BattleContext& bc, int pile) {  // 0 draw, 1 hand, 2 discard, 3 exhaust
+    std::set<int> out;
+    const auto& cm = bc.cards;
+    if (pile == 1) for (int i = 0; i < cm.cardsInHand; ++i) out.insert(cm.hand[i].uniqueId);
+    if (pile == 0) for (const auto& c : cm.drawPile) out.insert(c.uniqueId);
+    if (pile == 2) for (const auto& c : cm.discardPile) out.insert(c.uniqueId);
+    if (pile == 3) for (const auto& c : cm.exhaustPile) out.insert(c.uniqueId);
+    return out;
+}
+
+// Cards drawn by a request: in hand now and in the draw or discard pile before. After END_TURN the old hand was
+// discarded first, so any card that existed before counts.
+// `left_hand`: a card that left the hand during the request (the played card, a Warcry pick); if it is back in
+// hand it was drawn back (e.g. reshuffled and drawn by Dark Embrace).
+Json drawn_json(const std::set<int>& draw_before, const std::set<int>& disc_before, const std::set<int>& hand_before,
+                bool end_turn, int left_hand, int limbo, const BattleContext& bc) {
+    Json out = Json::array();
+    for (int i = 0; i < bc.cards.cardsInHand; ++i) {
+        const auto& c = bc.cards.hand[i];
+        const bool was_pile = draw_before.count(c.uniqueId) || disc_before.count(c.uniqueId);
+        if (was_pile || (end_turn && hand_before.count(c.uniqueId)) || c.uniqueId == left_hand || c.uniqueId == limbo) out.push_back(card_json(c));
+    }
+    return out;
+}
+
+// Cards moved from hand to exhaust by a request (True Grit's random exhaust, choices).
+Json exhausted_json(const std::set<int>& hand_before, const std::set<int>& exh_before, const BattleContext& bc) {
+    Json out = Json::array();
+    for (const auto& c : bc.cards.exhaustPile)
+        if (hand_before.count(c.uniqueId) && !exh_before.count(c.uniqueId)) out.push_back(card_json(c));
+    return out;
+}
+
 Json actions_json(const BattleContext& bc) {
     Json out = Json::array();
     for (const auto& a : search::Action::getAllActionsInState(bc)) {
@@ -99,6 +149,8 @@ Json actions_json(const BattleContext& bc) {
                 break;
             case search::ActionType::SINGLE_CARD_SELECT:
                 j["select_idx"] = a.getSelectIdx();
+                j["task"] = static_cast<int>(bc.cardSelectInfo.cardSelectTask);
+                if (const auto* c = select_source(bc, a.getSelectIdx())) j["card"] = card_json(*c);
                 break;
             default:
                 break;
@@ -156,14 +208,26 @@ int main() {
                 bc.emplace();
                 bc->init(gc);
                 const Random fresh(gc.seed + gc.floorNum);  // BattleContext::init's aiRng seed
-                resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(fresh, bc->aiRng)}};
+                Json drawn = Json::array();
+                for (int i = 0; i < bc->cards.cardsInHand; ++i) drawn.push_back(card_json(bc->cards.hand[i]));
+                resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(fresh, bc->aiRng)},
+                        {"drawn", drawn}, {"exhausted", Json::array()}};
             } else if (cmd == "step") {
                 if (!bc) throw std::runtime_error{"no fight"};
                 const search::Action a{r.at("bits").get<std::uint32_t>()};
                 if (!a.isValidAction(*bc)) throw std::runtime_error{"invalid action"};
                 const Random before = bc->aiRng;
+                const auto draw_b = uids(*bc, 0), hand_b = uids(*bc, 1), disc_b = uids(*bc, 2), exh_b = uids(*bc, 3);
+                int left_hand = -1;
+                if (a.getActionType() == search::ActionType::CARD) left_hand = bc->cards.hand[a.getSourceIdx()].uniqueId;
+                if (a.getActionType() == search::ActionType::SINGLE_CARD_SELECT
+                    && bc->cardSelectInfo.cardSelectTask == CardSelectTask::WARCRY) left_hand = bc->cards.hand[a.getSelectIdx()].uniqueId;
+                // the card being played while a choice is pending (in limbo; it may be reshuffled and drawn back)
+                const int limbo = a.getActionType() == search::ActionType::SINGLE_CARD_SELECT
+                    ? bc->curCardQueueItem.card.uniqueId : -1;
                 a.execute(*bc);
-                resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(before, bc->aiRng)}};
+                resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(before, bc->aiRng)},
+                        {"drawn", drawn_json(draw_b, disc_b, hand_b, a.getActionType() == search::ActionType::END_TURN, left_hand, limbo, *bc)}, {"exhausted", exhausted_json(hand_b, exh_b, *bc)}};
             } else if (cmd == "cards") {
                 Json cards = Json::array();
                 for (int id = 1; id < static_cast<int>(CardId::ZAP) + 1; ++id) {

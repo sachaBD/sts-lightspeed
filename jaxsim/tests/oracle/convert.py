@@ -13,7 +13,7 @@ MS = {n: i for i, n in enumerate(jaxsim.MONSTER_STATUS_NAMES)}
 CPP_CARD = {n: i for i, n in enumerate(ids.CARDS_CPP)}
 CPP_RELIC = {n: i for i, n in enumerate(ids.RELICS_CPP)}
 PILES = ("draw", "hand", "discard", "exhaust")  # api.PILE_* order
-ACTION_CARD, ACTION_END_TURN = 0, 4
+ACTION_CARD, ACTION_POTION, ACTION_SELECT, ACTION_END_TURN = 0, 1, 2, 4
 OUTCOME_VICTORY, OUTCOME_LOSS = 1, 2
 
 
@@ -34,6 +34,11 @@ def slot_of(obs, ident, new: dict | None = None, ignore_cost: bool = False) -> i
     same_cost = True if ignore_cost else (np.asarray(obs.slot_cost) == cost)
     hit = np.flatnonzero((np.asarray(obs.slot_card) == card) & (np.asarray(obs.slot_upgraded) == up)
                          & same_cost & (np.asarray(obs.slot_misc) == misc))
+    if len(hit) > 1 and ignore_cost:   # identities split by cost (Blood for Blood): exact cost, else one with copies
+        exact = hit[np.asarray(obs.slot_cost)[hit] == cost]
+        piles = np.asarray(obs.piles)
+        live = hit[(piles[0, hit] + piles[2, hit]) > 0]
+        hit = exact if len(exact) else (live[:1] if len(live) else hit[:1])
     if len(hit) == 1:
         return int(hit[0])
     if len(hit) == 0 and new is not None:
@@ -106,7 +111,7 @@ def legal_actions(actions, obs, spec) -> dict[int, int]:
     """C++ legal actions -> {jaxsim action: C++ bits}. Identical cards collapse onto one slot action."""
     out = {}
     for a in actions:
-        if a["type"] == ACTION_CARD:
+        if a["type"] in (ACTION_CARD, ACTION_SELECT):   # play a hand card / pick a card for a choice
             out.setdefault(slot_of(obs, identity(a["card"])), a["bits"])
         elif a["type"] == ACTION_END_TURN:
             out[spec.END_TURN] = a["bits"]

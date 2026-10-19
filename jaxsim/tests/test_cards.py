@@ -138,7 +138,10 @@ def test_blood_for_blood_cheaper_per_hp_losing_hit():
     s = _hand_of(env, ["BLOOD_FOR_BLOOD", "STRIKE_RED"], block=5)._replace(e_move=I16(champ.EXECUTE))
     b = _slot(s, "BLOOD_FOR_BLOOD")
     s = env.step(s, jnp.int32(env.spec.END_TURN), jax.random.key(1))
-    assert int(env.observe(s).slot_cost[b]) == 4 - 2    # Execute 10 x 2 through 5 block: both hits lose hp
+    o = env.observe(s)
+    held = [d for d in range(env.spec.D) if int(o.slot_card[d]) == jaxsim.CARD_NAMES.index("BLOOD_FOR_BLOOD")
+            and int(o.piles[api.PILE_HAND, d]) == 1]
+    assert [int(o.slot_cost[d]) for d in held] == [4 - 2]   # Execute 10 x 2 through 5 block: both hits lose hp
 
 
 def test_second_wind_exhausts_sentinel_for_energy():
@@ -215,3 +218,37 @@ def test_brutality_upgraded_is_innate():
     for k in range(5):
         s = env.init(jaxsim.make_start(deck, hp=80), jax.random.key(k))
         assert int(env.observe(s).piles[api.PILE_HAND, _slot(s, "BRUTALITY")]) == 1
+
+
+def test_headbutt_choice_pending_then_pick_goes_on_top_and_is_drawn_first():
+    env = jaxsim.make_env()
+    s = _hand_of(env, ["HEADBUTT", "STRIKE_RED", "DEFEND_RED"], energy=3)
+    p = s.piles.at[api.PILE_DISCARD, _slot(s, "STRIKE_RED")].set(1).at[api.PILE_DISCARD, _slot(s, "DEFEND_RED")].set(1)
+    s = _play(env, s._replace(piles=p), "HEADBUTT")
+    m = env.legal_mask(s)
+    assert int(env.observe(s).choice[0]) != 0 and not bool(m[env.spec.END_TURN])
+    assert bool(m[_slot(s, "DEFEND_RED")]) and bool(m[_slot(s, "STRIKE_RED")])
+    s = env.step(s, jnp.int32(_slot(s, "DEFEND_RED")), jax.random.key(2))
+    o = env.observe(s)
+    assert int(o.choice[0]) == 0 and int(o.known_top[0]) == _slot(s, "DEFEND_RED")
+    assert int(o.piles[api.PILE_DISCARD, _slot(s, "HEADBUTT")]) == 1          # the card left after the pick
+
+
+def test_single_option_choices_resolve_themselves():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["ARMAMENTS", "STRIKE_RED"], energy=3), "ARMAMENTS")
+    o = env.observe(s)
+    assert int(o.choice[0]) == 0
+    up = [d for d in range(env.spec.D) if int(o.slot_card[d]) == jaxsim.CARD_NAMES.index("STRIKE_RED")
+          and int(o.slot_upgraded[d]) == 1]
+    assert len(up) == 1 and int(o.piles[api.PILE_HAND, up[0]]) == 1
+
+
+def test_dual_wield_copies_and_exhume_returns_a_card():
+    env = jaxsim.make_env()
+    s = _play(env, _hand_of(env, ["DUAL_WIELD", "BASH"], energy=3), "DUAL_WIELD")
+    assert int(env.observe(s).piles[api.PILE_HAND, _slot(s, "BASH")]) == 2
+    s = _hand_of(env, ["EXHUME", "STRIKE_RED"], energy=3)
+    s = s._replace(piles=s.piles.at[api.PILE_EXHAUST, _slot(s, "STRIKE_RED")].set(1))
+    s = _play(env, s, "EXHUME")
+    assert int(env.observe(s).piles[api.PILE_HAND, _slot(s, "STRIKE_RED")]) == 2

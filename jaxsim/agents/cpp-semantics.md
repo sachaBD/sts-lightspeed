@@ -51,6 +51,18 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
   **before** the monster turn, and the drawn cards stay in hand.
 - Flame Barrier hits back after each monster hit (even fully blocked) and can kill the Champ on his turn.
 
+## Choices and queue timing (batch 4)
+- A choice pauses the action queue (`InputState::CARD_SELECT`). Everything queued behind it runs after the pick:
+  Burning Pact's draws, Rage block (onUseAttackCard), OnAfterCardUsed, and queued Juggernaut/Dark Embrace.
+- Auto-resolve rules differ per action (ArmamentsAction, HeadbuttAction, ChooseExhaustOne, WarcryAction,
+  DualWieldAction, ExhumeAction): count valid **copies**; 0 does nothing, 1 resolves, 2+ opens the select.
+- End-of-turn triggers from ethereal exhaust are queued behind UnnamedEndOfTurnAction, which queues
+  MonsterStartTurn. Their follow-ups (Juggernaut damage, Fire Breathing on drawn statuses) land after the
+  monster's block reset.
+- The can't-win rule in `executeActions`: no cards anywhere → loss unless something deals damage without cards.
+- `UpgradeAllCardsInHand` (Armaments+) upgraded curses too (fixed). Upgrading resets cost to the upgraded
+  table cost when it differs (Blood for Blood keeps no reduction; Corruption-zeroed skills regain a cost).
+
 ## Oracle gotchas
 - `PlayerStatus` starts with INVALID = 0 and ends with THE_BOMB. `MonsterStatus` has INVALID last. Loop
   bounds matter.
@@ -60,6 +72,7 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 
 ## C++ bugs fixed in both simulators
 Iron Wave block calculated twice; Disarm+ was −2; Seeing Red didn't exhaust; Rage cost 1 (fell through
-`getEnergyCost`'s default); 8 card colours rotated (Brilliance/Brutality/Buffer/Bullet Time,
+`getEnergyCost`'s default); Armaments+ upgraded curses; the can't-win check ignored Combust and Juggernaut;
+8 card colours rotated (Brilliance/Brutality/Buffer/Bullet Time,
 Collect/Combust/Compile Driver/Concentrate). `tests/test_cpp_tables.py` and the card-table parity test guard
 against this kind of drift.
