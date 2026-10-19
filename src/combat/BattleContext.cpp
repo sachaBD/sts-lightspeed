@@ -3502,6 +3502,10 @@ void BattleContext::drinkPotion(int idx, int target) {
 
     discardPotion(idx);
 
+    if (player.hasRelic<R::TOY_ORNITHOPTER>()) {  // heal 5 whenever a potion is used
+        player.heal(5);
+    }
+
     // todo - dont need to add to bot because always will have nothing in actionQueue?
 
     switch (p) {
@@ -3527,7 +3531,7 @@ void BattleContext::drinkPotion(int idx, int target) {
 
 
         case Potion::BLOOD_POTION: {
-            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 20 : 40)) / 100.0f));
+            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 40 : 20)) / 100.0f));
             addToBot(Actions::HealPlayer(healAmt));
             break;
         }
