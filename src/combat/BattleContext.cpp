@@ -781,6 +781,8 @@ void BattleContext::executeActions() {
         if (cards.cardsInHand + cards.discardPile.size() + cards.drawPile.size() == 0) {
             bool hasDamageWithoutCards = player.hasStatus<PS::OMEGA>() ||
                     player.hasStatus<PS::THORNS>() ||
+                    player.hasStatus<PS::COMBUST>() ||      // damages every end of turn
+                    player.hasStatus<PS::JUGGERNAUT>() ||   // damages on block gain (Metallicize, ...)
                     player.bomb1 ||
                     player.bomb2 ||
                     player.bomb3;
