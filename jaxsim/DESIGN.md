@@ -147,7 +147,15 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
     Good Instincts, Finesse, Dramatic Entrance, Mind Blast, Master of Strategy, Hand of Greed;
   - the statuses those cards create: Wound, Dazed, Burn;
   - Ascender's Bane.
-- No relic effects and no potions yet. Relics are carried in the observation only.
+- Relics (`_core/relics.py`, `tables/relics.py`): about 50 relics with no in-combat effect are accepted as no-ops;
+  batch 1 implements stats, +1 energy relics, combat-start relics (Anchor, Blood Vial, Pantograph, Lantern, Bag of
+  Marbles/Preparation, Red Mask, Bronze Scales, Thread and Needle, Fossilized Helix, Clockwork Souvenir, Gremlin
+  Visage, Mark of Pain) and turn-start relics (Mercury Hourglass, Horn Cleat, Captain's Wheel, Happy Flower, Art
+  of War, Incense Burner). StartSpec.relic_data carries run counters (contract v4).
+- Artifact negates any player debuff, including Flex's / Mutagenic Strength's end-of-turn strength loss and
+  Berserk's Vulnerable. The order of debuffs matters (Taunt: Weak then Vulnerable). Red Mask's Weak on the Champ is
+  just-applied (skips its first decrement).
+- No potions yet.
 - `make_start` rejects anything else.
 - The card table's cost, type, exhausts and ethereal values are checked against the C++ card data (`test_card_table_matches_cpp`).
 

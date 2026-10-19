@@ -36,7 +36,15 @@ class State(NamedTuple):
     p_no_draw: jax.Array      # Battle Trance: no more draws this turn (stacks, like the C++ status)
     p_energy_per_turn: jax.Array  # 3, +1 per Berserk
     p_intangible: jax.Array   # Apparition: every hit / hp loss becomes 1; decrements at end of round
-    p_cards_played: jax.Array  # cards played this turn (Normality)
+    p_cards_played: jax.Array  # cards played this turn (Normality, Velvet Choker)
+    p_attacks_played: jax.Array  # attacks played this turn (Art of War)
+    p_artifact: jax.Array     # negates the next debuff
+    p_buffer: jax.Array       # negates the next hp loss from damage
+    p_thorns: jax.Array       # damage back per monster hit (Bronze Scales)
+    p_plated: jax.Array       # block at end of turn; -1 per unblocked attack hit
+    rel: jax.Array            # [n_relics] bool: relics held
+    r_happy_flower: jax.Array
+    r_incense: jax.Array
     # powers (amounts as the C++ statuses; combust_hp = Combust cards played, the C++ combustHpLoss)
     p_metallicize: jax.Array
     p_demon_form: jax.Array
@@ -69,6 +77,7 @@ class State(NamedTuple):
     e_move: jax.Array         # intent: next move (jaxsim move id)
     e_last: jax.Array         # move before the intent
     e_ai: jax.Array           # C++ miscInfo layout: bits 0-1 defensive stances used, bit 2 phase 2
+    e_ja: jax.Array           # just-applied bits (1 vuln, 2 weak) for monster-sourced debuffs on the Champ (Red Mask)
     # flow
     choice: jax.Array         # [CHOICE]
     turn: jax.Array

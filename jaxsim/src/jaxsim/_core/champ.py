@@ -63,10 +63,9 @@ def monster_damage(s: State, base):
 
 
 def _debuff_player(s: State, field: str, bit: int, amount) -> State:
-    """Player::debuff from a monster: just-applied only when the debuff is new (C++ `!hasStatus`)."""
-    cur = getattr(s, field)
-    new = (amount > 0) & (cur == 0)
-    return s._replace(**{field: (cur + amount).astype(I16)}, p_ja=(s.p_ja | jnp.where(new, bit, 0)).astype(I16))
+    """Player::debuff from a monster: Artifact negates it; just-applied only when the debuff is new."""
+    from jaxsim._core import relics
+    return relics.debuff_player(s, field, bit, amount, monster_source=True)
 
 
 def take_turn(s: State, r, jugg_late=0, fb_late=0) -> State:
@@ -87,13 +86,19 @@ def take_turn(s: State, r, jugg_late=0, fb_late=0) -> State:
         hit = ~s.done & (h < hits)
         blocked = jnp.minimum(s.block.astype(I32), jnp.where(hit, per, 0))
         s = s._replace(block=i16(s.block - blocked))
-        s = hooks.lose_hp(s, jnp.where(hit, per - blocked, 0), False, hit)
-        s = hooks.hurt_enemy(s, s.p_flame_barrier.astype(I32), hit & ~s.done & (s.p_flame_barrier > 0))
+        dmg = jnp.where(hit, per - blocked, 0)
+        buffered = (dmg > 0) & (s.p_buffer > 0)                 # Player::attacked: Buffer, then Plated Armor
+        dmg = jnp.where(buffered, 0, dmg)
+        s = s._replace(p_buffer=i16(s.p_buffer - buffered), p_plated=i16(jnp.maximum(s.p_plated - (dmg > 0), 0)))
+        s = hooks.lose_hp(s, dmg, False, hit)
+        back = (s.p_thorns + s.p_flame_barrier).astype(I32)    # Thorns and Flame Barrier hit back per hit
+        s = hooks.hurt_enemy(s, back, hit & ~s.done & (back > 0))
     go = ~s.done
     slap, taunt = (m == FACE_SLAP) & go, (m == TAUNT) & go
+    # C++ order (matters with Artifact): Face Slap Frail then Vulnerable; Taunt Weak then Vulnerable
     s = _debuff_player(s, "p_frail", JA_FRAIL, jnp.where(slap, 2, 0))
-    s = _debuff_player(s, "p_vuln", JA_VULN, jnp.where(slap | taunt, 2, 0))
     s = _debuff_player(s, "p_weak", JA_WEAK, jnp.where(taunt, 2, 0))
+    s = _debuff_player(s, "p_vuln", JA_VULN, jnp.where(slap | taunt, 2, 0))
     anger = (m == ANGER) & go
     e_str = jnp.where(anger, jnp.maximum(s.e_str, 0), s.e_str)
     e_str = e_str + jnp.select([anger, (m == GLOAT) & go], [ANGER_STR, GLOAT_STR], 0)
@@ -114,4 +119,5 @@ def end_of_round(s: State) -> State:
         e_block=i16(s.e_block + s.e_metallicize),
         p_vuln=i16(dec(s.p_vuln, JA_VULN)), p_weak=i16(dec(s.p_weak, JA_WEAK)), p_frail=i16(dec(s.p_frail, JA_FRAIL)),
         p_ja=I16(0), p_intangible=i16(jnp.maximum(s.p_intangible - 1, 0)),
-        e_vuln=i16(jnp.maximum(s.e_vuln - 1, 0)), e_weak=i16(jnp.maximum(s.e_weak - 1, 0)))
+        e_vuln=i16(jnp.where((s.e_ja & 1) != 0, s.e_vuln, jnp.maximum(s.e_vuln - 1, 0))),
+        e_weak=i16(jnp.where((s.e_ja & 2) != 0, s.e_weak, jnp.maximum(s.e_weak - 1, 0))), e_ja=I16(0))

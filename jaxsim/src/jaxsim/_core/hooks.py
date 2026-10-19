@@ -66,7 +66,13 @@ def damage_player_hits(s: State, per, k, self_damage, go) -> State:
     blocked = jnp.minimum(s.block.astype(I32), total)
     events = jnp.where(per > 0, k - jnp.minimum(k, s.block.astype(I32) // jnp.maximum(per, 1)), 0)
     s = s._replace(block=i16(s.block - blocked))
-    return lose_hp(s, total - blocked, self_damage, go & (k > 0), events)
+    lost = total - blocked
+    # Buffer negates the first hits that would lose hp (the first of them may be partly blocked)
+    absorbed = jnp.minimum(s.p_buffer.astype(I32), events)
+    first = lost - jnp.maximum(events - 1, 0) * per
+    lost = lost - jnp.where(absorbed > 0, first + (absorbed - 1) * per, 0)
+    s = s._replace(p_buffer=i16(s.p_buffer - absorbed))
+    return lose_hp(s, lost, self_damage, go & (k > 0), events - absorbed)
 
 
 def on_exhaust(s: State, n, sentinel_energy, go):
