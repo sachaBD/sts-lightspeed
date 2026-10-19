@@ -68,13 +68,17 @@ def _debuff_player(s: State, field: str, bit: int, amount) -> State:
     return s._replace(**{field: (cur + amount).astype(I16)}, p_ja=(s.p_ja | jnp.where(new, bit, 0)).astype(I16))
 
 
-def take_turn(s: State, r) -> State:
+def take_turn(s: State, r, jugg_late=0, fb_late=0) -> State:
     """The Champ's move, hit by hit: block absorbs, hp loss (Blood for Blood), Flame Barrier hits back after
     each hit. Nothing more happens once the fight is over."""
     from jaxsim._core import hooks
     i16 = hooks.i16
     m = s.e_move
     s = s._replace(e_block=jnp.where(s.done, s.e_block, I16(0)))
+    # queued behind the monster turn start, so after the block reset: Fire Breathing from end-of-turn Dark
+    # Embrace draws, then Juggernaut from the end-of-turn Feel No Pain block
+    s = hooks.hurt_enemy(s, jnp.asarray(fb_late, I32), ~s.done & (jnp.asarray(fb_late) > 0))
+    s = hooks.juggernaut(s, jugg_late)
     base = jnp.select([m == HEAVY_SLASH, m == FACE_SLAP, m == EXECUTE], [HEAVY_SLASH_DMG, FACE_SLAP_DMG, EXECUTE_DMG], 0)
     hits = jnp.select([m == EXECUTE, base > 0], [EXECUTE_HITS, 1], 0)
     per = monster_damage(s, base)

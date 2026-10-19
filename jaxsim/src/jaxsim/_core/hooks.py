@@ -33,11 +33,15 @@ def juggernaut(s: State, events) -> State:
 
 
 def blood_events(s: State, events) -> State:
-    """CardInstance::tookDamage on every hp-loss event: Blood for Blood costs 1 less (not below 0)."""
-    from jaxsim._core import cards
-    blood = cards.rows(s)[:, tc.col("blood_cost")] == 1
-    cost = jnp.where(blood, jnp.maximum(s.slot_cost - events, 0), s.slot_cost)
-    return s._replace(slot_cost=cost.astype(I16))
+    """CardManager::onTookDamage on every hp-loss event: Blood for Blood copies in the draw pile, hand and discard
+    cost 1 less (not below 0); exhausted copies keep their cost."""
+    from jaxsim._core import cards, piles
+    from jaxsim import api
+    blood = (cards.rows(s)[:, tc.col("blood_cost")] == 1) & (s.slot_cost > 0) & (events > 0)
+    move = jnp.zeros_like(s.piles, I32)
+    for pile in (api.PILE_DRAW, api.PILE_HAND, api.PILE_DISCARD):
+        move = move.at[pile].set(jnp.where(blood, s.piles[pile], 0).astype(I32))
+    return piles.retarget(s, move, s.slot_card, s.slot_up, jnp.maximum(s.slot_cost - events, 0), s.slot_misc)
 
 
 def lose_hp(s: State, amount, self_damage, go, events=1) -> State:

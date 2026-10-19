@@ -68,15 +68,20 @@ def card_block(s: State, base):
 def exhaust_hand(s: State, mask, go):
     """Exhaust every hand copy of the slots in `mask`, with on-exhaust triggers.
     Returns (state, number exhausted, Juggernaut events, triggered draws)."""
+    return exhaust_counts(s, jnp.where(mask, s.piles[api.PILE_HAND].astype(I32), 0), go)
+
+
+def exhaust_counts(s: State, n, go):
+    """Exhaust n[d] hand copies of each slot, with on-exhaust triggers."""
     p = s.piles.astype(I32)
-    n = jnp.where(mask & go, p[api.PILE_HAND], 0)
+    n = jnp.where(go, n, 0)
     p = p.at[api.PILE_HAND].add(-n).at[api.PILE_EXHAUST].add(n)
     s = s._replace(piles=p.astype(I16))
     s, jugg, draws = hooks.on_exhaust(s, n.sum(), jnp.sum(n * rows(s)[:, C("exhaust_energy")]), go)
     return s, n.sum(), jugg, draws
 
 
-def play_pre(spec: api.EnvSpec, s: State, d):
+def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     """Returns (state, own draws, triggered draws, Juggernaut events)."""
     r = row(s, d)
     sp, ctype = r[C("special")], r[C("type")]
@@ -105,6 +110,17 @@ def play_pre(spec: api.EnvSpec, s: State, d):
     jugg = jugg + jnp.where(sp == tc.SP_SECOND_WIND, blocks * (per > 0) * go, ev)
     s, ev = hooks.gain_block(s, jnp.where(sp == tc.SP_ENTRENCH, s.block, 0), go)
     jugg = jugg + ev
+    # Armaments+: upgrade every upgradable card in hand. True Grit: exhaust a random card in hand.
+    from jaxsim._core import choice
+    s = choice.upgrade_copies(s, jnp.where((sp == tc.SP_UPGRADE_HAND) & go & choice.can_upgrade(s),
+                                           s.piles[api.PILE_HAND].astype(I32), 0))
+    hand_now = s.piles[api.PILE_HAND].astype(I32)
+    if forced is None:
+        pick, _ = piles._sample(hand_now, jnp.zeros_like(hand_now), 1, key)
+    else:
+        pick = jnp.minimum(forced.exhaust.astype(I32), hand_now)
+    s, _, j2, t2 = exhaust_counts(s, jnp.minimum(pick, 1), go & (sp == tc.SP_RANDOM_EXHAUST))
+    jugg, trig = jugg + j2, trig + t2
 
     # damage x hits (same per-hit damage; block absorbs hit by hit, which sums to this)
     dropkick_bonus = (sp == tc.SP_DROPKICK) & (s.e_vuln > 0)          # checked before the hit
@@ -140,8 +156,9 @@ def play_pre(spec: api.EnvSpec, s: State, d):
                    p_lose_str=i16(s.p_lose_str + r[C("lose_str")] * live),
                    energy=i16(s.energy + (r[C("energy")] + dropkick_bonus) * live))
     s = _apply_power(s, r, live)
-    # Rage: block after each attack's actions
-    s, ev = hooks.gain_block(s, jnp.where(ctype == tc.ATTACK, s.p_rage.astype(I32), 0), ~s.done)
+    # Rage: block after each attack's actions (after its choice, if it has one: see step.py)
+    rage = (ctype == tc.ATTACK) & (r[C("choice")] == tc.CH_NONE)
+    s, ev = hooks.gain_block(s, jnp.where(rage, s.p_rage.astype(I32), 0), ~s.done)
     jugg = jugg + ev
     n_draw = (r[C("draw")] + dropkick_bonus) * live
     return s, n_draw, trig, jugg
@@ -166,11 +183,11 @@ def _apply_power(s: State, r, live) -> State:
     return s._replace(**upd)
 
 
-def play_post(spec: api.EnvSpec, s: State, d, jugg):
+def play_post(spec: api.EnvSpec, s: State, d, jugg, active=True):
     """Created cards and Battle Trance (cleared on victory), the card leaving (unless the player died), then
-    Juggernaut damage. Returns (state, triggered draws)."""
+    Juggernaut damage. Nothing happens unless `active` (a choice is pending). Returns (state, triggered draws)."""
     r = row(s, d)
-    live = ~s.done
+    live = ~s.done & active
     p = s.piles.astype(I32)
     p = p.at[api.PILE_DISCARD, d].add(r[C("copy_to_discard")] * live)
     s = s._replace(piles=p.astype(I16), p_no_draw=(s.p_no_draw + ((r[C("special")] == tc.SP_BATTLE_TRANCE) & live))
@@ -191,8 +208,8 @@ def play_post(spec: api.EnvSpec, s: State, d, jugg):
     # the played card leaves: powers vanish, exhausting cards (and skills under Corruption) go to exhaust with
     # their triggers, the rest to discard. After a win it still leaves; after the player dies it stays in limbo.
     exhausts = (r[C("exhausts")] == 1) | ((s.p_corruption > 0) & (r[C("type")] == tc.SKILL))
-    leaves = (r[C("type")] != tc.POWER) & (s.hp > 0)
-    rampage = r[C("special")] == tc.SP_RAMPAGE   # leaves with its bonus raised: a new identity
+    leaves = (r[C("type")] != tc.POWER) & (s.hp > 0) & active
+    rampage = (r[C("special")] == tc.SP_RAMPAGE) & active   # leaves with its bonus raised: a new identity
     s, slot2, ok2 = piles.find_or_alloc(s, s.slot_card[d], s.slot_up[d], s.slot_cost[d],
                                         s.slot_misc[d] + r[C("special_amt")], rampage)
     leave = jnp.where(rampage & ok2, slot2, d)
@@ -201,5 +218,5 @@ def play_post(spec: api.EnvSpec, s: State, d, jugg):
     s = s._replace(piles=p.astype(I16))
     s, j2, trig = hooks.on_exhaust(s, (exhausts & leaves).astype(I32),
                                    jnp.where(exhausts & leaves, r[C("exhaust_energy")], 0), ~s.done)
-    s = hooks.juggernaut(s, jugg + j2)
-    return s, trig * (~s.done)
+    s = hooks.juggernaut(s, jnp.where(active, jugg + j2, 0))
+    return s, trig * (~s.done) * active

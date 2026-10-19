@@ -116,6 +116,15 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
     them behind the monster turn start); only Fire Breathing timing on such a draw could differ.
 - The first Corruption sets every skill's cost to 0 for the combat (CardManager::onBuffCorruption); later
   skills are free while it is active. Berserk raises energy per turn (no status in the C++): Obs.player[4].
+- Choices (`_core/choice.py`): a single pick from one pile. As in the C++, 0 valid copies does nothing, exactly
+  1 resolves itself, 2+ ends the step with the choice pending. The rest of the card (Burning Pact's draws, the card
+  leaving, Rage on Headbutt, queued Juggernaut and Dark Embrace) runs in the pick step. Warcry's choice comes
+  after its own draws, every other choice before. Headbutt/Warcry put the card on top (`known_top`, drawn first).
+- Juggernaut and Fire Breathing triggered by end-of-turn ethereal exhaust (Feel No Pain block, Dark Embrace draws)
+  land after the Champ's block reset: they are queued behind the monster turn start.
+- The C++ can't-win rule: with no cards in hand, draw and discard and no damage without cards (Combust,
+  Juggernaut), the fight is a loss.
+- Blood for Blood copies in the exhaust pile keep their cost (only draw, hand and discard copies get cheaper).
 - Card identity includes cost (Blood for Blood) and misc (Rampage's bonus). A played Rampage leaves to a new
   identity with its bonus raised. Slots whose copies are all gone are reused once no never-used slot is left.
 
@@ -126,7 +135,8 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
     Heavy Blade, Perfected Strike, Body Slam, Whirlwind, Searing Blow, Rampage, Blood for Blood, Sever Soul,
     Second Wind, Fiend Fire) and batch 3 (powers and hooks: Metallicize, Demon Form, Barricade, Berserk,
     Brutality, Combust, Corruption, Dark Embrace, Evolve, Feel No Pain, Fire Breathing, Juggernaut, Rupture,
-    Rage, Flame Barrier);
+    Rage, Flame Barrier) and batch 4 (choices: Armaments, Headbutt, True Grit, Warcry, Burning Pact, Dual Wield,
+    Exhume);
   - the statuses those cards create: Wound, Dazed, Burn;
   - Ascender's Bane.
 - No relic effects and no potions yet. Relics are carried in the observation only.
