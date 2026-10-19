@@ -832,6 +832,9 @@ void BattleContext::executeActions() {
 
             if (cards.cardsInHand == 0) {
                 drawCards(1);
+                if (!actionQueue.isEmpty()) {
+                    continue;  // an empty draw pile queued a shuffle + draw: do it now, not after the next action
+                }
             }
         }
 
