@@ -45,8 +45,10 @@ def blood_events(s: State, events) -> State:
 
 
 def lose_hp(s: State, amount, self_damage, go, events=1) -> State:
-    """Player::hpWasLost for `amount` (> 0) already past block, as `events` separate losses: Rupture per self
-    damage loss, Blood for Blood per loss, death."""
+    """Player::loseHp / hpWasLost for `amount` (> 0) already past block, as `events` separate losses: Rupture per
+    self damage loss, Blood for Blood per loss, death. Intangible makes each loss 1."""
+    amount = jnp.asarray(amount, I32)
+    amount = jnp.where((s.p_intangible > 0) & (amount > 0), jnp.minimum(amount, events), amount)
     lost = go & (amount > 0)
     events = jnp.where(lost, events, 0)
     hp = s.hp - jnp.where(lost, amount, 0)
@@ -59,6 +61,7 @@ def lose_hp(s: State, amount, self_damage, go, events=1) -> State:
 def damage_player_hits(s: State, per, k, self_damage, go) -> State:
     """k separate Player::damage hits of `per` (Burns): block absorbs first; hit i loses hp iff i * per > block."""
     k = jnp.where(go, k, 0)
+    per = jnp.where((s.p_intangible > 0) & (per > 0), 1, per)
     total = per * k
     blocked = jnp.minimum(s.block.astype(I32), total)
     events = jnp.where(per > 0, k - jnp.minimum(k, s.block.astype(I32) // jnp.maximum(per, 1)), 0)

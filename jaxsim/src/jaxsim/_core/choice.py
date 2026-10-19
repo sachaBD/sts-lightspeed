@@ -97,6 +97,7 @@ def apply_pick(spec: api.EnvSpec, s: State, kind, d, limbo, go):
     s = s._replace(piles=p.astype(I16))
     s = push_top(s, d, go & (to_top.sum() > 0))
     ex = to_exh.sum()
+    s = cards.returns_on_exhaust(s, to_exh, go)
     s, jugg, trig = hooks.on_exhaust(s, ex, jnp.sum(to_exh * cards.rows(s)[:, tc.col("exhaust_energy")]), go & (ex > 0))
     return s, jugg, trig
 

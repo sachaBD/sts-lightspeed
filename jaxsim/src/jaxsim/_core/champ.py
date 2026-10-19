@@ -58,7 +58,8 @@ def monster_damage(s: State, base):
     d = (base + s.e_str.astype(I32)).astype(F32)
     d = jnp.where(s.e_weak > 0, d * F32(0.75), d)
     d = jnp.where(s.p_vuln > 0, d * F32(1.5), d)
-    return jnp.maximum(d.astype(I32), 0)
+    d = jnp.where(s.p_intangible > 0, jnp.minimum(d, F32(1)), d)
+    return jnp.maximum(jnp.floor(d).astype(I32), 0)
 
 
 def _debuff_player(s: State, field: str, bit: int, amount) -> State:
@@ -112,5 +113,5 @@ def end_of_round(s: State) -> State:
     return s._replace(
         e_block=i16(s.e_block + s.e_metallicize),
         p_vuln=i16(dec(s.p_vuln, JA_VULN)), p_weak=i16(dec(s.p_weak, JA_WEAK)), p_frail=i16(dec(s.p_frail, JA_FRAIL)),
-        p_ja=I16(0),
+        p_ja=I16(0), p_intangible=i16(jnp.maximum(s.p_intangible - 1, 0)),
         e_vuln=i16(jnp.maximum(s.e_vuln - 1, 0)), e_weak=i16(jnp.maximum(s.e_weak - 1, 0)))

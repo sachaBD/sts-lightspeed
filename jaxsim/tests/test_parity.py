@@ -24,6 +24,13 @@ SPEC = jaxsim.DEFAULT_SPEC
 FIGHTS = int(os.environ.get("PARITY_FIGHTS", "60"))
 _init = jax.jit(lambda start, key, forced: core_init.init(SPEC, start, key, forced))
 _step = jax.jit(lambda s, a, key, forced: core_step.step(SPEC, s, a, key, forced))
+_ENV = jaxsim.make_env(SPEC)
+# one call and one device-to-host copy per step: observation, outcome, legal mask
+_view = jax.jit(lambda s: (_ENV.observe(s), _ENV.outcome(s), _ENV.legal_mask(s)))
+
+
+def view(s):
+    return jax.device_get(_view(s))
 KEY = jax.random.key(0)
 
 
@@ -56,7 +63,10 @@ def random_deck(rng: random.Random):
     deck = [("ASCENDERS_BANE", 0)] + [(c, 0) for c in ["STRIKE_RED"] * 4 + ["DEFEND_RED"] * 4 + ["BASH"]]
     for _ in range(rng.randint(0, 14)):
         card, up = rng.choice(pool), rng.randint(0, 1)
-        deck.append((card, rng.randint(1, 6) if card == "SEARING_BLOW" and up else up))
+        if card == "RITUAL_DAGGER":
+            deck.append((card, up, rng.randint(15, 40)))
+        else:
+            deck.append((card, rng.randint(1, 6) if card == "SEARING_BLOW" and up else up))
     if rng.random() < 0.3:
         deck.append(("WOUND", 0))
     return deck
@@ -101,8 +111,8 @@ def roll_of(resp):
     return rolls[0] if rolls else 0
 
 
-def check(resp, s, where):
-    obs, out = jaxsim.make_env().observe(s), jaxsim.make_env().outcome(s)
+def check(resp, s, where, seen=None):
+    obs, out, legal_mask = seen if seen is not None else view(s)
     try:
         exp = convert.expected(resp["state"], obs, SPEC.D)
     except KeyError as e:
@@ -129,7 +139,7 @@ def check(resp, s, where):
     assert int(out.error) == 0, f"{where}: error bits {int(out.error)}"
     if not out.done:
         cpp = set(convert.legal_actions(resp["actions"], obs, SPEC))
-        jax_legal = set(np.flatnonzero(np.asarray(jaxsim.make_env().legal_mask(s))).tolist())
+        jax_legal = set(np.flatnonzero(np.asarray(legal_mask)).tolist())
         assert cpp == jax_legal, f"{where}: legal c++ {sorted(cpp)} != jax {sorted(jax_legal)}"
 
 
@@ -144,10 +154,11 @@ def test_random_fight(fight):
         obs0 = jaxsim.make_env().observe(core_init.init(SPEC, start, KEY))  # slot table only
         hand = convert.slot_counts(obs0, resp["drawn"], SPEC.D)
         s = _init(start, KEY, forced(hand, roll_of(resp)))
-        check(resp, s, f"fight {fight} init")
+        seen = view(s)
+        check(resp, s, f"fight {fight} init", seen)
         for i in range(2000):
-            obs = jaxsim.make_env().observe(s)
-            if jaxsim.make_env().outcome(s).done:
+            obs, out, _ = seen
+            if out.done:
                 break
             try:
                 legal = convert.legal_actions(resp["actions"], obs, SPEC)
@@ -174,6 +185,7 @@ def test_random_fight(fight):
                 print("  pre-step jax known_top", np.asarray(obs.known_top).tolist(), "forced drawn", np.flatnonzero(drawn).tolist(),
                       "jax enemy", np.asarray(obs.enemy).tolist(), "player", np.asarray(obs.player).tolist())
             s = _step(s, jnp.int32(a), KEY, forced(drawn, roll_of(resp), exhausted))
-            check(resp, s, f"fight {fight} step {i} action {a}")
+            seen = view(s)
+            check(resp, s, f"fight {fight} step {i} action {a}", seen)
     finally:
         oracle.close()

@@ -41,9 +41,10 @@ def make_start(
     allow_unsupported: bool = False,
     spec: api.EnvSpec = api.DEFAULT_SPEC,
 ) -> api.StartSpec:
-    """deck: card names ("STRIKE_RED") or (name, upgraded) pairs. Identical cards share one slot, as do
+    """deck: card names ("STRIKE_RED"), (name, upgraded) or (name, upgraded, misc). Identical cards share one slot, as do
     identical potions. potion_capacity defaults to 2 (ascension 20); pass 4 for Potion Belt."""
-    counts = Counter((c, 0) if isinstance(c, str) else (c[0], int(c[1])) for c in deck)
+    counts = Counter((c, 0, 0) if isinstance(c, str) else (c[0], int(c[1]), int(c[2]) if len(c) > 2 else 0)
+                     for c in deck)
     if len(counts) > spec.D:
         raise ValueError(f"deck has {len(counts)} distinct cards, more than D={spec.D}")
     potion_counts = Counter(potions)
@@ -54,7 +55,7 @@ def make_start(
     if not 0 <= potion_capacity <= spec.P:
         raise ValueError(f"bad potion_capacity {potion_capacity}")
     if not allow_unsupported:
-        missing = sorted({n for n, _ in counts if n not in supported_cards()} | set(potions))
+        missing = sorted({n for n, _, _ in counts if n not in supported_cards()} | set(potions))
         if missing:
             raise ValueError(f"not implemented yet: {missing} (supported cards: jaxsim.supported_cards())")
     max_hp = hp if max_hp is None else max_hp
@@ -64,8 +65,9 @@ def make_start(
     card = np.zeros(spec.D, np.int16)
     up = np.zeros(spec.D, np.int16)
     count = np.zeros(spec.D, np.int16)
-    for i, ((name, u), n) in enumerate(sorted(counts.items())):
-        card[i], up[i], count[i] = _id(_CARD, name, "card"), u, n
+    misc = np.zeros(spec.D, np.int16)
+    for i, ((name, u, m), n) in enumerate(sorted(counts.items())):
+        card[i], up[i], misc[i], count[i] = _id(_CARD, name, "card"), u, m, n
     rel = np.zeros(spec.R, np.int16)
     rel[: len(relics)] = [_id(_RELIC, r, "relic") for r in relics]
     pot = np.zeros(spec.P, np.int16)
@@ -73,7 +75,7 @@ def make_start(
     for i, (name, n) in enumerate(sorted(potion_counts.items())):
         pot[i], pot_n[i] = _id(_POTION, name, "potion"), n
     i16 = lambda x: jnp.asarray(x, jnp.int16)
-    return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), relics=i16(rel),
+    return api.StartSpec(card=i16(card), upgraded=i16(up), count=i16(count), misc=i16(misc), relics=i16(rel),
                          potions=i16(pot), potion_count=i16(pot_n), potion_capacity=i16(potion_capacity), hp=i16(hp), max_hp=i16(max_hp))
 
 

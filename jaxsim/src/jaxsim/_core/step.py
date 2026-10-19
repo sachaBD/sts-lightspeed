@@ -42,6 +42,13 @@ def end_pre(spec: api.EnvSpec, s: State):
     burns = jnp.where(r[:, tc.col("eot_damage")] > 0, hand, 0)
     per_burn = jnp.max(jnp.where(burns > 0, r[:, tc.col("eot_damage")], 0))   # Burn+ only from other enemies
     s = hooks.damage_player_hits(s, per_burn, burns.sum(), True, ~s.done)
+    # Doubt (Weak), Shame (Frail): monster-sourced debuffs; Regret: lose hp = cards in hand, per Regret
+    go = ~s.done
+    s = champ._debuff_player(s, "p_weak", champ.JA_WEAK, jnp.where(go, jnp.sum(hand * r[:, tc.col("eot_weak")]), 0))
+    s = champ._debuff_player(s, "p_frail", champ.JA_FRAIL, jnp.where(go, jnp.sum(hand * r[:, tc.col("eot_frail")]), 0))
+    regrets = jnp.sum(hand * r[:, tc.col("eot_regret")])
+    per = jnp.where(s.p_intangible > 0, jnp.minimum(hand.sum(), 1), hand.sum())
+    s = hooks.lose_hp(s, regrets * per, True, ~s.done & (regrets > 0), events=regrets)
     # Combust: lose 1 hp per Combust played (self damage), then damage the enemy
     s = hooks.lose_hp(s, s.p_combust_hp.astype(I32), True, ~s.done & (s.p_combust > 0))
     s = hooks.hurt_enemy(s, s.p_combust.astype(I32), ~s.done & (s.p_combust > 0))
@@ -70,7 +77,8 @@ def end_mid(spec: api.EnvSpec, s: State, roll, jugg_late, fb_late):
         p_vuln=w(nxt.p_vuln, s.p_vuln), p_weak=w(nxt.p_weak, s.p_weak), p_frail=w(nxt.p_frail, s.p_frail),
         p_ja=w(nxt.p_ja, s.p_ja), turn=w(i16(s.turn + 1), s.turn),
         block=w(jnp.where(s.p_barricade > 0, s.block, I16(0)), s.block),
-        p_flame_barrier=w(I16(0), s.p_flame_barrier), done=s.done | cap, truncated=s.truncated | cap)
+        p_flame_barrier=w(I16(0), s.p_flame_barrier), p_cards_played=w(I16(0), s.p_cards_played),
+        p_intangible=w(nxt.p_intangible, s.p_intangible), done=s.done | cap, truncated=s.truncated | cap)
     # Brutality: lose hp (not self damage) and draw, after the hand draw
     s = hooks.lose_hp(s, s.p_brutality.astype(I32), False, ~s.done & (s.p_brutality > 0))
     return s, jnp.where(s.done, 0, HAND_DRAW + s.p_brutality.astype(I32))

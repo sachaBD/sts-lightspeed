@@ -20,7 +20,8 @@ TO_DRAW, TO_DISCARD, TO_HAND = 1, 2, 3
 # special values: small dedicated rules, each a few masked scalar ops in cards.py
 (SP_NONE, SP_CLASH, SP_DROPKICK, SP_SPOT_WEAKNESS, SP_ENTRENCH, SP_LIMIT_BREAK, SP_FEED, SP_REAPER,
  SP_BATTLE_TRANCE, SP_HEAVY_BLADE, SP_PERFECTED_STRIKE, SP_BODY_SLAM, SP_WHIRLWIND, SP_SEARING_BLOW, SP_RAMPAGE,
- SP_SEVER_SOUL, SP_SECOND_WIND, SP_FIEND_FIRE, SP_UPGRADE_HAND, SP_RANDOM_EXHAUST) = range(20)
+ SP_SEVER_SOUL, SP_SECOND_WIND, SP_FIEND_FIRE, SP_UPGRADE_HAND, SP_RANDOM_EXHAUST, SP_MISC_DAMAGE, SP_MIND_BLAST,
+ SP_INTANGIBLE) = range(23)
 
 # choice kinds (choice column): single picks from one pile, see _core/choice.py. Warcry's choice comes after its
 # own draws; every other choice comes before the card's draws.
@@ -29,7 +30,8 @@ CH_NONE, CH_ARMAMENTS, CH_HEADBUTT, CH_EXHAUST_ONE, CH_WARCRY, CH_DUAL_WIELD, CH
 COLUMNS = ("supported", "cost", "type", "playable", "ethereal", "exhausts",
            "hp_loss", "block", "damage", "hits", "e_vuln", "e_weak", "e_str", "p_str", "lose_str", "energy", "draw",
            "copy_to_discard", "create_card", "create_pile", "create_n", "eot_damage", "special", "special_amt",
-           "is_strike", "blood_cost", "exhaust_energy", "power", "power_amt", "innate", "choice")
+           "is_strike", "blood_cost", "exhaust_energy", "power", "power_amt", "innate", "choice",
+           "heal", "eot_weak", "eot_frail", "eot_regret", "pain", "normality", "returns_on_exhaust")
 _COL = {c: i for i, c in enumerate(COLUMNS)}
 
 # power column: which player power a card adds power_amt to (BARRICADE / CORRUPTION are flags set to 1;
@@ -130,6 +132,36 @@ _ROWS = {
     "DUAL_WIELD":      (dict(cost=1, type=SKILL, choice=CH_DUAL_WIELD), {}),
     "EXHUME":          (dict(cost=1, type=SKILL, choice=CH_EXHUME, exhausts=1), dict(cost=0)),
     # statuses and curses
+    # colorless cards found in Ironclad decks
+    "APPARITION":      (dict(cost=1, type=SKILL, special=SP_INTANGIBLE, special_amt=1, ethereal=1, exhausts=1),
+                        dict(ethereal=0)),
+    "BITE":            (dict(cost=1, type=ATTACK, damage=7, heal=2), dict(damage=8, heal=3)),
+    "JAX":             (dict(cost=0, type=SKILL, hp_loss=3, p_str=2), dict(p_str=3)),
+    "RITUAL_DAGGER":   (dict(cost=1, type=ATTACK, special=SP_MISC_DAMAGE, exhausts=1), {}),
+    "BANDAGE_UP":      (dict(cost=0, type=SKILL, heal=4, exhausts=1), dict(heal=6)),
+    "BLIND":           (dict(cost=0, type=SKILL, e_weak=2), {}),
+    "TRIP":            (dict(cost=0, type=SKILL, e_vuln=2), {}),
+    "FLASH_OF_STEEL":  (dict(cost=0, type=ATTACK, damage=3, draw=1), dict(damage=6)),
+    "SWIFT_STRIKE":    (dict(cost=0, type=ATTACK, damage=7, is_strike=1), dict(damage=10)),
+    "GOOD_INSTINCTS":  (dict(cost=0, type=SKILL, block=6), dict(block=9)),
+    "FINESSE":         (dict(cost=0, type=SKILL, block=2, draw=1), dict(block=4)),
+    "DRAMATIC_ENTRANCE": (dict(cost=0, type=ATTACK, damage=8, innate=1, exhausts=1), dict(damage=12)),
+    "MIND_BLAST":      (dict(cost=2, type=ATTACK, special=SP_MIND_BLAST, innate=1), dict(cost=1)),
+    "MASTER_OF_STRATEGY": (dict(cost=0, type=SKILL, draw=3, exhausts=1), dict(draw=4)),
+    "HAND_OF_GREED":   (dict(cost=2, type=ATTACK, damage=20), dict(damage=25)),
+    # curses
+    "DECAY":           (dict(cost=-3, type=CURSE, playable=0, eot_damage=2), {}),
+    "DOUBT":           (dict(cost=-3, type=CURSE, playable=0, eot_weak=1), {}),
+    "SHAME":           (dict(cost=-3, type=CURSE, playable=0, eot_frail=1), {}),
+    "REGRET":          (dict(cost=-3, type=CURSE, playable=0, eot_regret=1), {}),
+    "PAIN":            (dict(cost=-3, type=CURSE, playable=0, pain=1), {}),
+    "NORMALITY":       (dict(cost=-3, type=CURSE, playable=0, normality=1), {}),
+    "NECRONOMICURSE":  (dict(cost=-3, type=CURSE, playable=0, returns_on_exhaust=1), {}),
+    "CURSE_OF_THE_BELL": (dict(cost=-3, type=CURSE, playable=0), {}),
+    "WRITHE":          (dict(cost=-3, type=CURSE, playable=0, innate=1), {}),
+    "CLUMSY":          (dict(cost=-3, type=CURSE, playable=0, ethereal=1), {}),
+    "INJURY":          (dict(cost=-3, type=CURSE, playable=0), {}),
+    "PARASITE":        (dict(cost=-3, type=CURSE, playable=0), {}),
     "WOUND":           (dict(cost=-2, type=STATUS, playable=0), {}),
     "DAZED":           (dict(cost=-2, type=STATUS, playable=0, ethereal=1), {}),
     "BURN":            (dict(cost=-2, type=STATUS, playable=0, eot_damage=2), dict(eot_damage=4)),

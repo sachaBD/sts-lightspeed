@@ -49,7 +49,7 @@ import jax
 
 from jaxsim._core.tables import ids as _ids
 
-CONTRACT = "jaxsim_champ_v2"  # v2: Obs.player gains energy per turn
+CONTRACT = "jaxsim_champ_v3"  # v2: Obs.player gains energy per turn; v3: StartSpec.misc
 
 __all__ = [
     "CONTRACT", "EnvSpec", "DEFAULT_SPEC", "StartSpec", "Obs", "Outcome", "Env", "make_env",
@@ -144,6 +144,7 @@ class StartSpec(NamedTuple):
     card: jax.Array        # [D] card id
     upgraded: jax.Array    # [D] 0/1 (Searing Blow: upgrade count)
     count: jax.Array       # [D] copies in the deck
+    misc: jax.Array        # [D] per-card value carried by the deck card (Ritual Dagger's damage), else 0
     relics: jax.Array      # [R] relic ids, 0 = empty
     potions: jax.Array     # [P] potion ids, distinct, 0 = empty
     potion_count: jax.Array  # [P] copies held per potion slot

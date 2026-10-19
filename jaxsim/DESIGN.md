@@ -124,6 +124,10 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
   land after the Champ's block reset: they are queued behind the monster turn start.
 - The C++ can't-win rule: with no cards in hand, draw and discard and no damage without cards (Combust,
   Juggernaut), the fight is a loss.
+- Curses: Decay/Doubt/Shame/Regret act at end of turn from hand (after Burn); Pain costs 1 hp per Pain in hand
+  before each played card resolves; Normality stops plays after 3 cards this turn; Necronomicurse returns to hand
+  as a new copy when exhausted (Curse of the Bell does not). Curses have C++ cost -3.
+- Intangible (Apparition): every monster hit, Burn/Decay hit and hp loss becomes 1; it decrements at end of round.
 - Blood for Blood copies in the exhaust pile keep their cost (only draw, hand and discard copies get cheaper).
 - Card identity includes cost (Blood for Blood) and misc (Rampage's bonus). A played Rampage leaves to a new
   identity with its bonus raised. Slots whose copies are all gone are reused once no never-used slot is left.
@@ -137,6 +141,10 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
     Brutality, Combust, Corruption, Dark Embrace, Evolve, Feel No Pain, Fire Breathing, Juggernaut, Rupture,
     Rage, Flame Barrier) and batch 4 (choices: Armaments, Headbutt, True Grit, Warcry, Burning Pact, Dual Wield,
     Exhume);
+  - curses: Decay, Doubt, Shame, Regret, Pain, Normality, Necronomicurse, Writhe, Clumsy, Injury, Parasite,
+    Curse of the Bell;
+  - colorless: Apparition, Bite, J.A.X., Ritual Dagger, Bandage Up, Blind, Trip, Flash of Steel, Swift Strike,
+    Good Instincts, Finesse, Dramatic Entrance, Mind Blast, Master of Strategy, Hand of Greed;
   - the statuses those cards create: Wound, Dazed, Burn;
   - Ascender's Bane.
 - No relic effects and no potions yet. Relics are carried in the observation only.

@@ -35,6 +35,8 @@ class State(NamedTuple):
     p_lose_str: jax.Array     # Flex: strength lost at end of turn
     p_no_draw: jax.Array      # Battle Trance: no more draws this turn (stacks, like the C++ status)
     p_energy_per_turn: jax.Array  # 3, +1 per Berserk
+    p_intangible: jax.Array   # Apparition: every hit / hp loss becomes 1; decrements at end of round
+    p_cards_played: jax.Array  # cards played this turn (Normality)
     # powers (amounts as the C++ statuses; combust_hp = Combust cards played, the C++ combustHpLoss)
     p_metallicize: jax.Array
     p_demon_form: jax.Array
