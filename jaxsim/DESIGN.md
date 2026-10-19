@@ -155,6 +155,12 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
 - Artifact negates any player debuff, including Flex's / Mutagenic Strength's end-of-turn strength loss and
   Berserk's Vulnerable. The order of debuffs matters (Taunt: Weak then Vulnerable). Red Mask's Weak on the Champ is
   just-applied (skips its first decrement).
+- Relics batch 2: Pen Nib, Kunai, Shuriken, Ornamental Fan, Nunchaku, Ink Bottle, Letter Opener, Bird-Faced Urn,
+  Strike Dummy, Paper Phrog, The Boot, Champion Belt, Torii, Tungsten Rod, Ginger, Turnip, Self-Forming Clay,
+  Red Skull, Lizard Tail, Magic Flower, Mark of the Bloom, Orichalcum, Calipers, Ice Cream, Pocketwatch, Charon's
+  Ashes, Sundial, Unceasing Top. On-use relic actions are queued behind the card, so for a card with a choice
+  they apply after the choice (counters update at play). Runic Cube / Centennial Puzzle are implemented but not
+  yet enabled (their end-of-turn draws need harness support).
 - No potions yet.
 - `make_start` rejects anything else.
 - The card table's cost, type, exhausts and ethereal values are checked against the C++ card data (`test_card_table_matches_cpp`).

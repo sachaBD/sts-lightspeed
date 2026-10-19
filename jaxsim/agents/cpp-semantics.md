@@ -72,6 +72,19 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
   (which would return Curse of the Bell) is not called, which matches the real game.
 - Swift Strike is strike-tagged (Perfected Strike counts it). Ritual Dagger's damage is the deck card's misc.
 
+## Relics
+- initRelics order: stats/energy/Anchor/heals immediately, then the opening draw, then atBattleStart relics in the
+  run's relic order (Bag of Preparation draws, Mark of Pain wounds; Gremlin Visage's Weak is immediate, Clockwork's
+  Artifact is queued, so Artifact never blocks Visage), then Mercury Hourglass; Red Skull checks the run's hp.
+- Turn-start relics run after ++turn and before the block reset; their GainBlock/GainEnergy/Damage are queued, so
+  they land after the reset and the energy recharge (Art of War / Happy Flower add to the recharged energy).
+- On-use relics (Kunai, Shuriken, Fan, Pen Nib, Nunchaku, Ink Bottle, Letter Opener) update counters in
+  useCard and queue their actions behind the card's actions (and behind its choice).
+- Debuffs go through Player::debuff: Ginger/Turnip, then Artifact (also blocks Flex's / Mutagenic's strength
+  loss and Berserk's Vulnerable). Red Mask's Weak on the Champ is monster-sourced (just applied).
+- hp-loss triggers (Runic Cube, Centennial Puzzle) addToTop DrawCards: at end of turn the drawn card is then
+  discarded with the hand.
+
 ## Oracle gotchas
 - `PlayerStatus` starts with INVALID = 0 and ends with THE_BOMB. `MonsterStatus` has INVALID last. Loop
   bounds matter.
@@ -82,6 +95,7 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 ## C++ bugs fixed in both simulators
 Iron Wave block calculated twice; Disarm+ was −2; Seeing Red didn't exhaust; Rage cost 1 (fell through
 `getEnergyCost`'s default); Armaments+ upgraded curses; the can't-win check ignored Combust and Juggernaut; Trip cost 1;
+Unceasing Top with an empty draw pile drew only after the next action;
 8 card colours rotated (Brilliance/Brutality/Buffer/Bullet Time,
 Collect/Combust/Compile Driver/Concentrate). `tests/test_cpp_tables.py` and the card-table parity test guard
 against this kind of drift.

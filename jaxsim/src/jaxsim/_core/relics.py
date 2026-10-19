@@ -23,9 +23,14 @@ def data(start: api.StartSpec, name: str):
 
 
 def debuff_player(s: State, field: str, bit: int, amount, monster_source=True) -> State:
-    """Player::debuff: Artifact negates it (and is used up); a monster-sourced debuff is just-applied only if new."""
+    """Player::debuff: Ginger / Turnip ignore Weak / Frail; Artifact negates it (and is used up); a monster-sourced
+    debuff is just-applied only if new."""
     from jaxsim._core import champ
     amount = jnp.asarray(amount, I32)
+    if field == "p_weak":
+        amount = jnp.where(has(s, "GINGER"), 0, amount)
+    if field == "p_frail":
+        amount = jnp.where(has(s, "TURNIP"), 0, amount)
     blocked = (amount != 0) & (s.p_artifact > 0)
     s = s._replace(p_artifact=i16(s.p_artifact - blocked))
     amount = jnp.where(blocked, 0, amount)
@@ -50,9 +55,17 @@ def combat_start_pre_draw(spec: api.EnvSpec, s: State, start: api.StartSpec) -> 
     flower_now = h("HAPPY_FLOWER") & (flower == 3)
     incense = data(start, "INCENSE_BURNER") + 1
     incense_now = h("INCENSE_BURNER") & (incense == 6)
+    pen = data(start, "PEN_NIB")
+    # Lizard Tail is active only while unused (run data 1); used relics are dropped
+    rel = s.rel.at[tr.ID["LIZARD_TAIL"]].set(h("LIZARD_TAIL") & (data(start, "LIZARD_TAIL") != 0))
+    s = s._replace(rel=rel, r_pen_nib=i16(jnp.where(pen == 9, -1, pen)), p_pen_nib=i16(h("PEN_NIB") & (pen == 9)),
+                   r_ink=i16(data(start, "INK_BOTTLE")), r_nunchaku=i16(data(start, "NUNCHAKU")),
+                   r_sundial=i16(data(start, "SUNDIAL")))
+    # Red Skull: +3 Strength when the run's hp (before combat-start heals) is half or less
+    s = s._replace(p_str=i16(s.p_str + 3 * (h("RED_SKULL") & (s.hp <= s.max_hp // 2))))
+    s = hooks.heal(s, heal, True)
     return s._replace(
         p_energy_per_turn=i16(s.p_energy_per_turn + energy), block=i16(s.block + 10 * h("ANCHOR")),
-        hp=i16(jnp.minimum(s.hp + heal, s.max_hp)),
         energy=i16(s.energy + h("LANTERN") + flower_now),
         p_thorns=i16(s.p_thorns + 3 * h("BRONZE_SCALES")), p_plated=i16(s.p_plated + 4 * h("THREAD_AND_NEEDLE")),
         p_buffer=i16(s.p_buffer + h("FOSSILIZED_HELIX")),
@@ -69,7 +82,8 @@ def combat_start_post_draw(spec: api.EnvSpec, s: State) -> State:
     h = lambda n: has(s, n)
     # Bag of Marbles: DebuffAllEnemy(.., false); Red Mask: DebuffAllEnemy default (monster-sourced: just applied)
     red = h("RED_MASK") & (s.e_weak == 0)
-    s = s._replace(e_vuln=i16(s.e_vuln + h("BAG_OF_MARBLES")), e_weak=i16(s.e_weak + h("RED_MASK")),
+    s = s._replace(e_vuln=i16(s.e_vuln + h("BAG_OF_MARBLES")),
+                   e_weak=i16(s.e_weak + h("RED_MASK") + (h("BAG_OF_MARBLES") & h("CHAMPION_BELT"))),
                    e_ja=i16(s.e_ja | jnp.where(red, 2, 0)))
     # Gremlin Visage's Weak applies immediately; Clockwork Souvenir's Artifact is a queued action (later)
     s = debuff_player(s, "p_weak", champ.JA_WEAK, jnp.where(h("GREMLIN_VISAGE"), 1, 0))

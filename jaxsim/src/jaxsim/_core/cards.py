@@ -55,12 +55,33 @@ def playable(s: State):
     return hand & (r[:, C("playable")] == 1) & affordable & clash_ok & ~normality
 
 
-def player_attack_damage(s: State, base, strength):
-    """BattleContext::calculateCardDamage: float32 chain, truncated once."""
-    d = base.astype(F32) + strength.astype(F32)
+def _has(s: State, name: str):
+    return s.rel[_tr.ID[name]]
+
+
+def player_attack_damage(s: State, base, strength, strike=False):
+    """BattleContext::calculateCardDamage: float32 chain, truncated once. Strike Dummy +3 on strike cards, Pen Nib
+    x2, Weak x0.75, Vulnerable x1.5 (x1.75 with Paper Phrog)."""
+    d = base.astype(F32) + jnp.where(_has(s, "STRIKE_DUMMY") & strike, F32(3), F32(0)) + strength.astype(F32)
+    d = jnp.where(s.p_pen_nib > 0, d * F32(2), d)
     d = jnp.where(s.p_weak > 0, d * F32(0.75), d)
-    d = jnp.where(s.e_vuln > 0, d * F32(1.5), d)
+    d = jnp.where(s.e_vuln > 0, d * jnp.where(_has(s, "PAPER_PHROG"), F32(1.75), F32(1.5)), d)
     return jnp.maximum(d.astype(I32), 0)
+
+
+def attack_enemy(s: State, per, hits, go) -> State:
+    """`hits` attacks of `per` damage (Monster::attacked): block absorbs hit by hit; an unblocked part of 1-4 becomes
+    5 with The Boot."""
+    per, hits = jnp.asarray(per, I32), jnp.where(go, jnp.asarray(hits, I32), 0)
+    b = s.e_block.astype(I32)
+    full = jnp.where(per > 0, jnp.minimum(hits, b // jnp.maximum(per, 1)), hits)   # hits fully blocked
+    rest_block = b - full * per
+    left = hits - full
+    first = jnp.where(left > 0, per - jnp.minimum(rest_block, per), 0)             # the first hit through
+    boot = lambda u: jnp.where(_has(s, "THE_BOOT") & (u > 0) & (u < 5), 5, u)
+    unblocked = boot(first) + jnp.maximum(left - 1, 0) * boot(per)
+    s = s._replace(e_block=i16(s.e_block - jnp.minimum(b, per * hits)))   # 0 left if any hit got through
+    return hooks.hurt_enemy(s, unblocked, go & (hits > 0) & (unblocked > 0))
 
 
 def card_block(s: State, base):
@@ -106,7 +127,7 @@ def exhaust_counts(s: State, n, go):
 
 
 def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
-    """Returns (state, own draws, triggered draws, Juggernaut events)."""
+    """Returns (state, own draws, triggered draws, Juggernaut events, relic draws queued behind the card)."""
     r = row(s, d)
     sp, ctype = r[C("special")], r[C("type")]
     hand = s.piles[api.PILE_HAND]
@@ -164,14 +185,14 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
          n_up * (n_up + 7) // 2 + 12, r[C("damage")] + s.slot_misc[d], s.slot_misc[d], p[api.PILE_DRAW].sum()],
         r[C("damage")])
     hits = jnp.select([sp == tc.SP_WHIRLWIND, sp == tc.SP_FIEND_FIRE], [x, n_exhausted], r[C("hits")])
-    total = player_attack_damage(s, base, str_at_play) * hits
+    per_hit = player_attack_damage(s, base, str_at_play, r[C("is_strike")] == 1)
     e_hp_before = s.e_hp
-    s = hooks.hurt_enemy(s, total, go & (hits > 0))
+    s = attack_enemy(s, per_hit, hits, go & (hits > 0))
     # Reaper heals the hp it removed; Feed raises max hp on the kill (both survive the win)
     healed = jnp.where((sp == tc.SP_REAPER) & go, e_hp_before - s.e_hp, 0) + jnp.where(go, r[C("heal")], 0)
     feed = jnp.where((sp == tc.SP_FEED) & s.won & go, r[C("special_amt")], 0)
-    max_hp = s.max_hp + feed
-    s = s._replace(max_hp=i16(max_hp), hp=i16(jnp.minimum(s.hp + healed + feed, max_hp)))
+    s = s._replace(max_hp=i16(s.max_hp + feed))
+    s = hooks.heal(s, healed + feed, healed + feed > 0)
 
     # everything below is cleared on victory
     live = ~s.done
@@ -180,7 +201,8 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     p_str = s.p_str + r[C("p_str")] * live
     p_str = p_str + jnp.where((sp == tc.SP_SPOT_WEAKNESS) & champ.is_attack(s.e_move) & live, r[C("special_amt")], 0)
     p_str = jnp.where((sp == tc.SP_LIMIT_BREAK) & live, p_str * 2, p_str)
-    s = s._replace(e_vuln=i16(s.e_vuln + r[C("e_vuln")] * live), e_weak=i16(s.e_weak + r[C("e_weak")] * live),
+    belt = (r[C("e_vuln")] > 0) & live & _has(s, "CHAMPION_BELT")   # Champion Belt: Weak 1 with each Vulnerable
+    s = s._replace(e_vuln=i16(s.e_vuln + r[C("e_vuln")] * live), e_weak=i16(s.e_weak + r[C("e_weak")] * live + belt),
                    e_str=i16(s.e_str + r[C("e_str")] * live), p_str=i16(p_str),
 
                    energy=i16(s.energy + (r[C("energy")] + dropkick_bonus) * live),
@@ -192,8 +214,41 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     rage = (ctype == tc.ATTACK) & (r[C("choice")] == tc.CH_NONE)
     s, ev = hooks.gain_block(s, jnp.where(rage, s.p_rage.astype(I32), 0), ~s.done)
     jugg = jugg + ev
+    # relic counters now; their effects now unless the card has a choice (then after it: step.py)
+    s = relic_counters(s, ctype)
+    s, ev, ink_draw = relic_effects(s, ctype, r[C("choice")] == tc.CH_NONE)
+    s = hooks.heal(s, 2, (ctype == tc.POWER) & _has(s, "BIRD_FACED_URN") & ~s.done)   # immediate p.heal
+    jugg = jugg + ev
     n_draw = (r[C("draw")] + dropkick_bonus) * live
-    return s, n_draw, trig, jugg
+    return s, n_draw, trig, jugg, ink_draw
+
+
+def relic_counters(s: State, ctype) -> State:
+    """onUse*Card relic counters, updated when the card is played."""
+    go = ~s.done
+    attack, skill, power = (ctype == tc.ATTACK) & go, (ctype == tc.SKILL) & go, (ctype == tc.POWER) & go
+    pen = s.r_pen_nib + (attack & _has(s, "PEN_NIB"))
+    nun = s.r_nunchaku + (attack & _has(s, "NUNCHAKU"))
+    ink = s.r_ink + ((attack | skill | power) & _has(s, "INK_BOTTLE"))
+    return s._replace(r_pen_nib=i16(jnp.where(pen == 9, -1, pen)), r_nunchaku=i16(jnp.where(nun >= 10, 0, nun)),
+                      r_ink=i16(jnp.where(ink == 10, 0, ink)), p_skills_played=i16(s.p_skills_played + skill))
+
+
+def relic_effects(s: State, ctype, go):
+    """The actions those relics queue behind the card (after its choice, if it has one); triggers are read back
+    from the counters. Returns (state, Juggernaut events, draws)."""
+    go = go & ~s.done
+    attack, skill, power = (ctype == tc.ATTACK) & go, (ctype == tc.SKILL) & go, (ctype == tc.POWER) & go
+    third = attack & (s.p_attacks_played % 3 == 0)
+    s = s._replace(p_dex=i16(s.p_dex + (third & _has(s, "KUNAI"))), p_str=i16(s.p_str + (third & _has(s, "SHURIKEN"))))
+    s, ev = hooks.gain_block(s, jnp.where(third & _has(s, "ORNAMENTAL_FAN"), 4, 0), go)
+    # Pen Nib: this attack used the status; the 10th attack gets it (counter -1 right after it triggers)
+    s = s._replace(p_pen_nib=i16(jnp.where(attack, _has(s, "PEN_NIB") & (s.r_pen_nib == -1), s.p_pen_nib)))
+    s = s._replace(energy=i16(s.energy + (attack & _has(s, "NUNCHAKU") & (s.r_nunchaku == 0))))
+    skills = s.p_skills_played
+    s = hooks.hurt_enemy(s, 5, skill & _has(s, "LETTER_OPENER") & (skills >= 3) & (skills % 3 == 0))
+    ink = (attack | skill | power) & _has(s, "INK_BOTTLE") & (s.r_ink == 0)
+    return s, ev, ink.astype(I32)
 
 
 def _apply_power(s: State, r, live) -> State:

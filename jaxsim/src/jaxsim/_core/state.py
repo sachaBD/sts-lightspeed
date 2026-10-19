@@ -45,6 +45,14 @@ class State(NamedTuple):
     rel: jax.Array            # [n_relics] bool: relics held
     r_happy_flower: jax.Array
     r_incense: jax.Array
+    r_pen_nib: jax.Array      # Pen Nib counter (-1 right after it triggers, as the C++)
+    r_ink: jax.Array          # Ink Bottle counter
+    r_nunchaku: jax.Array     # Nunchaku counter
+    r_sundial: jax.Array      # Sundial counter
+    p_pen_nib: jax.Array      # Pen Nib status: the next attack deals double damage
+    p_skills_played: jax.Array  # skills played this turn (Letter Opener)
+    p_next_turn_block: jax.Array  # Self-Forming Clay
+    p_pending_draw: jax.Array  # draws triggered by hp loss (Runic Cube, Centennial Puzzle), done at the next draw
     # powers (amounts as the C++ statuses; combust_hp = Combust cards played, the C++ combustHpLoss)
     p_metallicize: jax.Array
     p_demon_form: jax.Array

@@ -19,6 +19,7 @@ from jaxsim import api
 from jaxsim._core import cards, champ, choice, hooks, piles
 from jaxsim._core.state import I16, I32, U32, State, tree_where
 from jaxsim._core.tables import cards as tc
+from jaxsim._core.tables import relics as relics_tr
 
 HAND_DRAW = 5
 i16 = hooks.i16
@@ -32,11 +33,14 @@ def legal_mask(spec: api.EnvSpec, s: State):
     return mask.at[spec.END_TURN].set(~pending)
 
 
-def end_pre(spec: api.EnvSpec, s: State):
-    """Up to the discard. Returns (state, Dark Embrace draws)."""
+def end_pre(spec: api.EnvSpec, s: State, key, forced):
+    """Up to the discard. Returns (state, Dark Embrace draws, late Juggernaut events, forced)."""
     r = cards.rows(s)
-    # Metallicize, then Plated Armor block (Juggernaut)
+    # Orichalcum (no block), Metallicize, then Plated Armor block (Juggernaut)
+    from jaxsim._core import relics
+    s, j_or = hooks.gain_block(s, jnp.where(relics.has(s, "ORICHALCUM") & (s.block <= 0), 6, 0), ~s.done)
     s, jugg = hooks.gain_block(s, s.p_metallicize.astype(I32), ~s.done)
+    jugg = jugg + j_or
     s, j_pl = hooks.gain_block(s, s.p_plated.astype(I32), ~s.done)
     jugg = jugg + j_pl
     # end-of-turn cards in hand (Burn): blockable self damage, one hit per Burn
@@ -60,6 +64,10 @@ def end_pre(spec: api.EnvSpec, s: State):
     lose = jnp.where(~s.done, s.p_lose_str.astype(I32), 0)
     s = relics.debuff_player(s, "p_str", 0, -lose)
     s = s._replace(p_lose_str=I16(0), p_no_draw=I16(0), p_rage=I16(0))
+    # draws triggered by hp loss so far this end of turn (Runic Cube, Centennial Puzzle) happen now, before the
+    # discard (the C++ adds them to the top of the queue)
+    s, forced, _, _ = piles.draw(spec, s, jnp.where(s.done, 0, s.p_pending_draw.astype(I32)), key, forced, extend=False)
+    s = s._replace(p_pending_draw=I16(0))
     # ethereal cards exhaust (with triggers), the rest of the hand is discarded
     s, _, j2, de = cards.exhaust_hand(s, r[:, tc.col("ethereal")] == 1, ~s.done)
     p = s.piles.astype(I32)
@@ -68,11 +76,12 @@ def end_pre(spec: api.EnvSpec, s: State):
     s = hooks.juggernaut(s, jugg)
     # Juggernaut from the ethereal-exhaust Feel No Pain block lands after the Champ's block reset (queued behind
     # the monster turn start); carried into end_mid
-    return s, de, j2
+    return s, de, j2, forced
 
 
 def end_mid(spec: api.EnvSpec, s: State, roll, jugg_late, fb_late):
     """Champ turn, end of round, next turn start. Returns (state, cards to draw)."""
+    played_last_turn = s.p_cards_played
     s = champ.take_turn(s, roll, jugg_late, fb_late)
     go = ~s.done
     nxt = champ.end_of_round(s)
@@ -83,21 +92,30 @@ def end_mid(spec: api.EnvSpec, s: State, roll, jugg_late, fb_late):
         e_ja=w(nxt.e_ja, s.e_ja),
         p_vuln=w(nxt.p_vuln, s.p_vuln), p_weak=w(nxt.p_weak, s.p_weak), p_frail=w(nxt.p_frail, s.p_frail),
         p_ja=w(nxt.p_ja, s.p_ja), turn=w(i16(s.turn + 1), s.turn),
-        block=w(jnp.where(s.p_barricade > 0, s.block, I16(0)), s.block),
+        block=w(jnp.where(s.p_barricade > 0, s.block,
+                          jnp.where(s.rel[relics_tr.ID["CALIPERS"]], jnp.maximum(s.block - 15, 0), 0)).astype(I16), s.block),
         p_flame_barrier=w(I16(0), s.p_flame_barrier), p_cards_played=w(I16(0), s.p_cards_played),
         p_intangible=w(nxt.p_intangible, s.p_intangible), done=s.done | cap, truncated=s.truncated | cap)
     from jaxsim._core import relics
     s, energy_bonus = relics.turn_start(s)
-    s = s._replace(p_attacks_played=jnp.where(go, I16(0), s.p_attacks_played))
+    # Self-Forming Clay's block; Pocketwatch (3 cards or fewer last turn: draw 3 more)
+    s, ev = hooks.gain_block(s, s.p_next_turn_block.astype(I32), go)
+    s = hooks.juggernaut(s, ev)._replace(p_next_turn_block=jnp.where(go, I16(0), s.p_next_turn_block))
+    watch = go & relics.has(s, "POCKETWATCH") & (played_last_turn <= 3)
+    s = s._replace(p_attacks_played=jnp.where(go, I16(0), s.p_attacks_played),
+                   p_skills_played=jnp.where(go, I16(0), s.p_skills_played))
     # Brutality: lose hp (not self damage) and draw, after the hand draw
     s = hooks.lose_hp(s, s.p_brutality.astype(I32), False, ~s.done & (s.p_brutality > 0))
-    return s, jnp.where(s.done, 0, HAND_DRAW + s.p_brutality.astype(I32)), energy_bonus
+    n = HAND_DRAW + s.p_brutality.astype(I32) + 3 * watch + s.p_pending_draw.astype(I32)
+    s = s._replace(p_pending_draw=I16(0))
+    return s, jnp.where(s.done, 0, n), energy_bonus
 
 
 def end_post(s: State, is_end, energy_bonus) -> State:
     go = is_end & ~s.done
     return s._replace(p_str=i16(s.p_str + jnp.where(go, s.p_demon_form, 0)),
-                      energy=jnp.where(go, i16(s.p_energy_per_turn + energy_bonus), s.energy))
+                      energy=jnp.where(go, i16(jnp.where(s.rel[relics_tr.ID["ICE_CREAM"]], s.energy, 0)
+                                               + s.p_energy_per_turn + energy_bonus), s.energy))
 
 
 def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
@@ -115,29 +133,43 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     kind = cards.row(s, d)[tc.col("choice")]
 
     # play a card: effects, then a pre-draw choice (everything but Warcry) that may stay pending
-    played, n_own, trig, jugg = cards.play_pre(spec, s, d, k_ex, forced)
+    played, n_own, trig, jugg, relic_draw = cards.play_pre(spec, s, d, k_ex, forced)
+    # (a pending choice stores relic draws queued behind the card, e.g. Ink Bottle: they come after the pick)
     played, pend_a, jugg, trig = choice.choice_point(spec, played, jnp.where(kind != tc.CH_WARCRY, kind, 0), d,
-                                                     jugg, trig)
+                                                     jugg, trig + relic_draw)
+    trig = trig - relic_draw
+    n_own = n_own + relic_draw
+    def queued_after_choice(st, slot, go):
+        """Rage and the on-use relic actions of a card with a choice: after the choice resolves."""
+        rr = cards.row(s, slot)
+        go = go & (rr[tc.col("choice")] != tc.CH_NONE)
+        st, ev1 = rage(st, slot, go)
+        st, ev2, draw = cards.relic_effects(st, rr[tc.col("type")], go)
+        return st, ev1 + ev2, draw
+
     rage = lambda st, slot, go: hooks.gain_block(st, jnp.where(
         go & (cards.row(s, slot)[tc.col("type")] == tc.ATTACK) & (cards.row(s, slot)[tc.col("choice")] != tc.CH_NONE),
         st.p_rage.astype(I32), 0), ~st.done)
-    played, ev = rage(played, d, ~pend_a)   # Rage after an attack's resolved choice (Headbutt)
+    played, ev, choice_draw = queued_after_choice(played, d, ~pend_a & (kind != tc.CH_WARCRY))
     jugg = jugg + ev
+    n_own = n_own + choice_draw
     # pick for a pending choice: its effect, then the rest of the card (Burning Pact draws after the pick)
     picked, j_p, t_p = choice.apply_pick(spec, s, s.choice[choice.KIND].astype(I32), d, limbo0, ~s.done)
     picked = picked._replace(choice=jnp.zeros_like(s.choice))
-    picked, ev_p = rage(picked, limbo0, True)
+    picked, ev_p, pick_draw = queued_after_choice(picked, limbo0, True)
     j_p = j_p + ev_p
     lim_kind = s.choice[choice.KIND].astype(I32)
-    n_pick = jnp.where(lim_kind != tc.CH_WARCRY, cards.row(s, limbo0)[tc.col("draw")], 0)
+    n_pick = jnp.where(lim_kind != tc.CH_WARCRY, cards.row(s, limbo0)[tc.col("draw")], 0) + pick_draw
     acted = tree_where(pending0, picked, played)
     jugg = jnp.where(pending0, s.choice[choice.JUGG] + j_p, jugg)
     trig = jnp.where(pending0, s.choice[choice.TRIG] + t_p, trig)
     n_a = jnp.where(pending0, n_pick, jnp.where(pend_a, 0, n_own))
     limbo = jnp.where(pending0, limbo0, d)
 
-    ended, n_de, jugg_late = end_pre(spec, s)
+    k_end, k_a = jax.random.split(k_a)
+    ended, n_de, jugg_late, forced_end = end_pre(spec, s, k_end, forced)
     mid = tree_where(is_end, ended, acted)
+    forced = forced if forced is None else tree_where(is_end, forced_end, forced)
     mid, forced, evolve_later, fb_late = piles.draw(spec, mid, jnp.where(is_end, n_de, n_a), k_a, forced,
                                                     extend=False, fire_now=~is_end)
     # Warcry's choice comes after its own draws
@@ -146,13 +178,23 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     mid, pend_b, jugg, trig = choice.choice_point(spec, mid, post_kind, d, jugg, trig + evolve_later)
     trig = trig - evolve_later
     pending = ~pending0 & (pend_a | pend_b) & ~is_end
+    # Warcry resolved now: its queued relic actions (Ink Bottle's draw joins the later draw)
+    mid, ev_w, warcry_draw = queued_after_choice(mid, d, ~pending0 & ~is_end & (kind == tc.CH_WARCRY) & ~pend_b)
+    jugg = jugg + ev_w
+    trig = trig + warcry_draw
     evolve_later = jnp.where(pend_b, 0, evolve_later)
 
     left, trig2 = cards.play_post(spec, mid, limbo, jugg, ~pending)
     turned, n_hand, energy_bonus = end_mid(spec, mid, roll, jugg_late, fb_late)
     mid = tree_where(is_end, turned, left)
-    n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2)) + evolve_later
-    mid, _, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
+    n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2 + mid.p_pending_draw)) + evolve_later
+    mid = mid._replace(p_pending_draw=jnp.where(is_end | pending, mid.p_pending_draw, I16(0)))
+    k_b, k_top = jax.random.split(k_b)
+    mid, forced, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
+    # Unceasing Top: an empty hand during the turn draws a card
+    top = (~is_end & ~pending & ~mid.done & mid.rel[relics_tr.ID["UNCEASING_TOP"]]
+           & (mid.piles[api.PILE_HAND].sum() == 0))
+    mid, _, _, _ = piles.draw(spec, mid, jnp.where(top, 1, 0), k_top, forced, extend=True)
     nxt = end_post(mid, is_end, energy_bonus)
 
     # the C++ can't-win rule (executeActions): no cards in hand, draw or discard and no damage without cards

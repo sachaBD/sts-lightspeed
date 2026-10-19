@@ -88,7 +88,8 @@ HOOK_FUEL = ["SECOND_WIND", "FIEND_FIRE", "BURNING_PACT", "TRUE_GRIT", "EXHUME",
              "IMMOLATE", "RECKLESS_CHARGE", "OFFERING", "HEMOKINESIS", "SENTINEL", "SHRUG_IT_OFF", "BLOOD_FOR_BLOOD"]
 
 
-RELIC_DATA = {"GIRYA": (0, 3), "DU_VU_DOLL": (0, 3), "HAPPY_FLOWER": (0, 2), "INCENSE_BURNER": (0, 5)}
+RELIC_DATA = {"GIRYA": (0, 3), "DU_VU_DOLL": (0, 3), "HAPPY_FLOWER": (0, 2), "INCENSE_BURNER": (0, 5),
+              "PEN_NIB": (0, 9), "INK_BOTTLE": (0, 9), "NUNCHAKU": (0, 9), "SUNDIAL": (0, 2), "LIZARD_TAIL": (0, 1)}
 
 
 def random_relics(rng):
@@ -196,7 +197,8 @@ def test_random_fight(fight):
             exhausted = convert.slot_counts(obs, resp["exhausted"], SPEC.D, new=new, ignore_cost=True)
             if os.environ.get("PARITY_DEBUG"):
                 print("  pre-step jax known_top", np.asarray(obs.known_top).tolist(), "forced drawn", np.flatnonzero(drawn).tolist(),
-                      "jax enemy", np.asarray(obs.enemy).tolist(), "player", np.asarray(obs.player).tolist())
+                      "jax enemy", np.asarray(obs.enemy).tolist(), "player", np.asarray(obs.player).tolist(),
+                      "ink", int(s.r_ink), "played", int(s.p_cards_played))
             s = _step(s, jnp.int32(a), KEY, forced(drawn, roll_of(resp), exhausted))
             seen = view(s)
             check(resp, s, f"fight {fight} step {i} action {a}", seen)
