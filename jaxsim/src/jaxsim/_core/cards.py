@@ -48,7 +48,8 @@ def playable(s: State):
     only_attacks = jnp.sum(jnp.where(hand & (r[:, C("type")] != tc.ATTACK), 1, 0)) == 0
     clash_ok = (r[:, C("special")] != tc.SP_CLASH) | only_attacks
     affordable = (cost == -1) | ((cost >= 0) & (cost <= s.energy))   # -1 = X: always playable
-    return hand & (r[:, C("playable")] == 1) & affordable & clash_ok
+    normality = jnp.any(hand & (r[:, C("normality")] == 1)) & (s.p_cards_played >= 3)
+    return hand & (r[:, C("playable")] == 1) & affordable & clash_ok & ~normality
 
 
 def player_attack_damage(s: State, base, strength):
@@ -71,11 +72,31 @@ def exhaust_hand(s: State, mask, go):
     return exhaust_counts(s, jnp.where(mask, s.piles[api.PILE_HAND].astype(I32), 0), go)
 
 
+def returns_on_exhaust(s: State, n, go) -> State:
+    """Necronomicurse / Curse of the Bell: an exhausted copy puts a new copy in hand (discard if the hand is full)."""
+    ret = jnp.where(go, n * rows(s)[:, C("returns_on_exhaust")], 0)
+    p = s.piles.astype(I32)
+    room = jnp.maximum(10 - p[api.PILE_HAND].sum(), 0)
+    to_hand = _take_first_c(ret, room)
+    p = p.at[api.PILE_HAND].add(to_hand).at[api.PILE_DISCARD].add(ret - to_hand)
+    s = s._replace(piles=p.astype(I16))
+    # the returned card is a new, unupgraded copy (MakeTempCardInHand(id))
+    move = jnp.zeros_like(s.piles, I32).at[api.PILE_HAND].set(to_hand).at[api.PILE_DISCARD].set(ret - to_hand)
+    card = s.slot_card.astype(I32)
+    return piles.retarget(s, move, card, jnp.zeros_like(card), TABLE[card, 0, C("cost")], jnp.zeros_like(card))
+
+
+def _take_first_c(c, k):
+    return jnp.clip(k - (jnp.cumsum(c) - c), 0, c)
+
+
 def exhaust_counts(s: State, n, go):
     """Exhaust n[d] hand copies of each slot, with on-exhaust triggers."""
     p = s.piles.astype(I32)
     n = jnp.where(go, n, 0)
     p = p.at[api.PILE_HAND].add(-n).at[api.PILE_EXHAUST].add(n)
+    s = returns_on_exhaust(s._replace(piles=p.astype(I16)), n, go)
+    p = s.piles.astype(I32)
     s = s._replace(piles=p.astype(I16))
     s, jugg, draws = hooks.on_exhaust(s, n.sum(), jnp.sum(n * rows(s)[:, C("exhaust_energy")]), go)
     return s, n.sum(), jugg, draws
@@ -89,8 +110,12 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     x = s.energy.astype(I32)                                            # X for X-cost cards
     cost = effective_cost(s, r, s.slot_cost[d].astype(I32))
     spent = jnp.where(cost == -1, x, cost)
-    s = s._replace(energy=i16(s.energy - spent), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1))
+    s = s._replace(energy=i16(s.energy - spent), piles=s.piles.at[api.PILE_HAND, d].set(hand[d] - 1),
+                   p_cards_played=i16(s.p_cards_played + 1))
     str_at_play = s.p_str                                               # damage is precomputed at play
+    # Pain in hand: 1 hp per Pain, before the card resolves (addToTop in triggerOnOtherCardPlayed)
+    pains = jnp.sum(jnp.where(rows(s)[:, C("pain")] == 1, s.piles[api.PILE_HAND].astype(I32), 0))
+    s = hooks.lose_hp(s, pains, False, ~s.done & (pains > 0), events=pains)
 
     # self hp loss (no block, Rupture)
     s = hooks.lose_hp(s, r[C("hp_loss")], True, ~s.done)
@@ -130,16 +155,16 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     amt = r[C("special_amt")]
     base = jnp.select(
         [sp == tc.SP_HEAVY_BLADE, sp == tc.SP_PERFECTED_STRIKE, sp == tc.SP_BODY_SLAM, sp == tc.SP_SEARING_BLOW,
-         sp == tc.SP_RAMPAGE],
+         sp == tc.SP_RAMPAGE, sp == tc.SP_MISC_DAMAGE, sp == tc.SP_MIND_BLAST],
         [r[C("damage")] + amt * str_at_play, r[C("damage")] + amt * (strikes + 1), body_slam_block,
-         n_up * (n_up + 7) // 2 + 12, r[C("damage")] + s.slot_misc[d]],
+         n_up * (n_up + 7) // 2 + 12, r[C("damage")] + s.slot_misc[d], s.slot_misc[d], p[api.PILE_DRAW].sum()],
         r[C("damage")])
     hits = jnp.select([sp == tc.SP_WHIRLWIND, sp == tc.SP_FIEND_FIRE], [x, n_exhausted], r[C("hits")])
     total = player_attack_damage(s, base, str_at_play) * hits
     e_hp_before = s.e_hp
     s = hooks.hurt_enemy(s, total, go & (hits > 0))
     # Reaper heals the hp it removed; Feed raises max hp on the kill (both survive the win)
-    healed = jnp.where((sp == tc.SP_REAPER) & go, e_hp_before - s.e_hp, 0)
+    healed = jnp.where((sp == tc.SP_REAPER) & go, e_hp_before - s.e_hp, 0) + jnp.where(go, r[C("heal")], 0)
     feed = jnp.where((sp == tc.SP_FEED) & s.won & go, r[C("special_amt")], 0)
     max_hp = s.max_hp + feed
     s = s._replace(max_hp=i16(max_hp), hp=i16(jnp.minimum(s.hp + healed + feed, max_hp)))
@@ -154,7 +179,8 @@ def play_pre(spec: api.EnvSpec, s: State, d, key, forced):
     s = s._replace(e_vuln=i16(s.e_vuln + r[C("e_vuln")] * live), e_weak=i16(s.e_weak + r[C("e_weak")] * live),
                    e_str=i16(s.e_str + r[C("e_str")] * live), p_str=i16(p_str),
                    p_lose_str=i16(s.p_lose_str + r[C("lose_str")] * live),
-                   energy=i16(s.energy + (r[C("energy")] + dropkick_bonus) * live))
+                   energy=i16(s.energy + (r[C("energy")] + dropkick_bonus) * live),
+                   p_intangible=i16(s.p_intangible + jnp.where((sp == tc.SP_INTANGIBLE) & live, r[C("special_amt")], 0)))
     s = _apply_power(s, r, live)
     # Rage: block after each attack's actions (after its choice, if it has one: see step.py)
     rage = (ctype == tc.ATTACK) & (r[C("choice")] == tc.CH_NONE)

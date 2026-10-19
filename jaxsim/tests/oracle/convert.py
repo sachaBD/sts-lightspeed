@@ -17,7 +17,7 @@ ACTION_CARD, ACTION_POTION, ACTION_SELECT, ACTION_END_TURN = 0, 1, 2, 4
 OUTCOME_VICTORY, OUTCOME_LOSS = 1, 2
 
 
-MISC_CARDS = {"RAMPAGE"}  # cards whose C++ specialData is part of the jaxsim identity (slot_misc)
+MISC_CARDS = {"RAMPAGE", "RITUAL_DAGGER"}  # cards whose C++ specialData is part of the jaxsim identity (slot_misc)
 
 
 def identity(c) -> tuple[int, int, int, int]:
@@ -58,7 +58,7 @@ def slot_counts(obs, cards, D, new: dict | None = None, ignore_cost: bool = Fals
 
 def cpp_deck(deck):
     """jaxsim deck list (names or (name, up)) -> oracle deck [[cpp id, upgrades]]."""
-    return [[CPP_CARD[c], 0] if isinstance(c, str) else [CPP_CARD[c[0]], c[1]] for c in deck]
+    return [[CPP_CARD[c], 0] if isinstance(c, str) else [CPP_CARD[c[0]], *c[1:]] for c in deck]
 
 
 def expected(state, obs, D) -> dict:

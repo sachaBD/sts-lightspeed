@@ -186,6 +186,7 @@ GameContext make_game(const Json& r) {
     for (const auto& c : r.at("deck")) {
         Card card{static_cast<CardId>(c.at(0).get<int>())};
         for (int i = 0; i < c.at(1).get<int>(); ++i) card.upgrade();
+        if (c.size() > 2) card.misc = static_cast<std::int16_t>(c.at(2).get<int>());
         gc.deck.obtainRaw(card);
     }
     gc.screenState = ScreenState::BATTLE;

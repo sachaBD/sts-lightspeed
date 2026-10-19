@@ -63,6 +63,15 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 - `UpgradeAllCardsInHand` (Armaments+) upgraded curses too (fixed). Upgrading resets cost to the upgraded
   table cost when it differs (Blood for Blood keeps no reduction; Corruption-zeroed skills regain a cost).
 
+## Curses and colorless (batch for #19)
+- End-of-turn curses are card-queue items in hand order (callEndOfTurnActions): Burn/Decay `DamagePlayer(.., true)`
+  (blockable, self damage), Doubt/Shame `debuff(1, isSourceMonster=true)`, Regret `PlayerLoseHp(cardsInHand, true)`.
+- Pain: `triggerOnOtherCardPlayed` addToTop `PlayerLoseHp(1)` per Pain in hand, so it lands before the card's actions.
+- Normality: `isCardPlayAllowed` checks `cardsPlayedThisTurn >= 3`.
+- Necronomicurse returns via an inline check in `triggerAndMoveToExhaustPile`; `CardInstance::triggerOnExhaust`
+  (which would return Curse of the Bell) is not called, which matches the real game.
+- Swift Strike is strike-tagged (Perfected Strike counts it). Ritual Dagger's damage is the deck card's misc.
+
 ## Oracle gotchas
 - `PlayerStatus` starts with INVALID = 0 and ends with THE_BOMB. `MonsterStatus` has INVALID last. Loop
   bounds matter.
@@ -72,7 +81,7 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 
 ## C++ bugs fixed in both simulators
 Iron Wave block calculated twice; Disarm+ was −2; Seeing Red didn't exhaust; Rage cost 1 (fell through
-`getEnergyCost`'s default); Armaments+ upgraded curses; the can't-win check ignored Combust and Juggernaut;
+`getEnergyCost`'s default); Armaments+ upgraded curses; the can't-win check ignored Combust and Juggernaut; Trip cost 1;
 8 card colours rotated (Brilliance/Brutality/Buffer/Bullet Time,
 Collect/Combust/Compile Driver/Concentrate). `tests/test_cpp_tables.py` and the card-table parity test guard
 against this kind of drift.
