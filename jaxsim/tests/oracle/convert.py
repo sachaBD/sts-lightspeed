@@ -12,6 +12,8 @@ PS = {n: i for i, n in enumerate(jaxsim.PLAYER_STATUS_NAMES)}
 MS = {n: i for i, n in enumerate(jaxsim.MONSTER_STATUS_NAMES)}
 CPP_CARD = {n: i for i, n in enumerate(ids.CARDS_CPP)}
 CPP_RELIC = {n: i for i, n in enumerate(ids.RELICS_CPP)}
+CPP_POTION = {n: i for i, n in enumerate(ids.POTIONS_CPP)}
+POTION = {n: i for i, n in enumerate(jaxsim.POTION_NAMES)}
 PILES = ("draw", "hand", "discard", "exhaust")  # api.PILE_* order
 ACTION_CARD, ACTION_POTION, ACTION_SELECT, ACTION_END_TURN = 0, 1, 2, 4
 OUTCOME_VICTORY, OUTCOME_LOSS = 1, 2
@@ -83,13 +85,25 @@ def expected(state, obs, D) -> dict:
                            MOVE[ids.MOVES_CPP[e["last"]]], e["misc"]]),
         "enemy_status": es,
         "turn": np.array(state["turn"]),
+        "potion_counts": potion_counts(state, obs),
         "done": state["outcome"] != 0,
         "won": state["outcome"] == OUTCOME_VICTORY,
     }
 
 
+def potion_counts(state, obs) -> np.ndarray:
+    out = np.zeros(len(np.asarray(obs.potions)), np.int32)
+    for cpp in state["potions"]:
+        name = ids.POTIONS_CPP[cpp]
+        if name in ("INVALID", "EMPTY_POTION_SLOT"):
+            continue
+        out[int(np.flatnonzero(np.asarray(obs.potions) == POTION[name])[0])] += 1
+    return out
+
+
 def actual(obs, out) -> dict:
     return {
+        "potion_counts": np.asarray(obs.potion_counts),
         "piles": np.asarray(obs.piles)[:4], "player": np.asarray(obs.player),
         "player_status": np.asarray(obs.player_status), "enemy": np.asarray(obs.enemy),
         "enemy_status": np.asarray(obs.enemy_status), "turn": np.asarray(obs.turn),
@@ -120,6 +134,12 @@ def legal_actions(actions, obs, spec) -> dict[int, int]:
             out.setdefault(slot_of(obs, identity(a["card"])), a["bits"])
         elif a["type"] == ACTION_END_TURN:
             out[spec.END_TURN] = a["bits"]
+        elif a["type"] == ACTION_POTION:
+            if a.get("discard"):
+                continue                                   # jaxsim has no potion discard
+            pid = POTION[ids.POTIONS_CPP[a["potion"]]]
+            slot = int(np.flatnonzero(np.asarray(obs.potions) == pid)[0])
+            out.setdefault(spec.potion_action(slot), a["bits"])
         else:
             raise NotImplementedError(f"oracle action type {a['type']}")
     return out

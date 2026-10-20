@@ -85,6 +85,12 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 - hp-loss triggers (Runic Cube, Centennial Puzzle) addToTop DrawCards: at end of turn the drawn card is then
   discarded with the hand.
 
+## Potions and energy timing
+- drinkPotion: discard the potion, Toy Ornithopter heal, then the effect (mostly queued actions).
+- Energy at turn start: rechargeEnergy runs immediately in afterMonsterTurns, before the queued draws, so energy
+  gained during the hand draw (Sundial) adds to it. Ice Cream keeps the old energy.
+- Fire Breathing damage from Warcry's own draw is queued behind Warcry's choice.
+
 ## Oracle gotchas
 - `PlayerStatus` starts with INVALID = 0 and ends with THE_BOMB. `MonsterStatus` has INVALID last. Loop
   bounds matter.
@@ -95,7 +101,8 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 ## C++ bugs fixed in both simulators
 Iron Wave block calculated twice; Disarm+ was −2; Seeing Red didn't exhaust; Rage cost 1 (fell through
 `getEnergyCost`'s default); Armaments+ upgraded curses; the can't-win check ignored Combust and Juggernaut; Trip cost 1;
-Unceasing Top with an empty draw pile drew only after the next action;
+Unceasing Top with an empty draw pile drew only after the next action; Blood Potion's
+heal was reversed with Sacred Bark; Toy Ornithopter did nothing;
 8 card colours rotated (Brilliance/Brutality/Buffer/Bullet Time,
 Collect/Combust/Compile Driver/Concentrate). `tests/test_cpp_tables.py` and the card-table parity test guard
 against this kind of drift.

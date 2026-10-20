@@ -100,6 +100,12 @@ def random_relics(rng):
     return [(n, rng.randint(*RELIC_DATA[n])) if n in RELIC_DATA else (n, 0) for n in names]
 
 
+def random_potions(rng):
+    """0-2 potions (A20 capacity 2) from the supported ones."""
+    from jaxsim._core.tables import potions as tp
+    return [rng.choice(tp.SUPPORTED_NAMES) for _ in range(rng.randint(0, 2))]
+
+
 def fight_setup(rng, fight):
     deck, hp = random_deck(rng), rng.randint(30, 80)
     if fight % 3 == 2:  # powers and the cards that trigger them, long fights
@@ -162,9 +168,10 @@ def test_random_fight(fight):
     oracle = Oracle()
     try:
         relics = random_relics(random.Random(10_000 + fight))
+        pots = random_potions(random.Random(20_000 + fight))
         resp = oracle.start(seed=1000 + fight, hp=hp, max_hp=max(hp, 80), deck=convert.cpp_deck(deck),
-                            relics=convert.cpp_relics(relics))
-        start = jaxsim.make_start(deck, hp=hp, max_hp=max(hp, 80), relics=relics)
+                            relics=convert.cpp_relics(relics), potions=[convert.CPP_POTION[p] for p in pots])
+        start = jaxsim.make_start(deck, hp=hp, max_hp=max(hp, 80), relics=relics, potions=pots)
         obs0 = jaxsim.make_env().observe(core_init.init(SPEC, start, KEY))  # slot table only
         hand = convert.slot_counts(obs0, resp["drawn"], SPEC.D)
         s = _init(start, KEY, forced(hand, roll_of(resp)))

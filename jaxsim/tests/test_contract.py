@@ -115,7 +115,7 @@ def test_terminal_is_absorbing(env, start, key):
 
 
 def test_unsupported_flags_error(env, key):
-    s = jaxsim.make_start(["BASH"], hp=10, potions=["FIRE_POTION"], allow_unsupported=True)
+    s = jaxsim.make_start(["BASH"], hp=10, potions=["ATTACK_POTION"], allow_unsupported=True)
     out = env.outcome(env.init(s, key))
     assert out.done and out.truncated and int(out.error) & api.ERR_UNSUPPORTED
 

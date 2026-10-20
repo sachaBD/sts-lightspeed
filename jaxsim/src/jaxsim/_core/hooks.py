@@ -86,8 +86,18 @@ def lose_hp(s: State, amount, self_damage, go, events=1) -> State:
                    p_next_turn_block=i16(s.p_next_turn_block + 3 * events * _rel(s, "SELF_FORMING_CLAY")),
                    p_pending_draw=i16(s.p_pending_draw + events * _rel(s, "RUNIC_CUBE") + 3 * centennial),
                    rel=s.rel.at[tr.ID["CENTENNIAL_PUZZLE"]].set(_rel(s, "CENTENNIAL_PUZZLE") & ~lost))
+    # Fairy in a Bottle (30% of max hp, 60% with Sacred Bark), else Lizard Tail (half max hp, once): instead of dying
+    from jaxsim._core.tables import potions as tpo
+    fairy_slot = (s.potions == tpo.ID["FAIRY_POTION"]) & (s.potion_n > 0)
+    fairy = died & jnp.any(fairy_slot) & ~_rel(s, "MARK_OF_THE_BLOOM")
+    first = jnp.argmax(fairy_slot)
+    s = s._replace(potion_n=s.potion_n.at[first].add(-fairy.astype(I16)))
+    s = s._replace(potions=jnp.where(s.potion_n > 0, s.potions, I16(0)))
+    pct = jnp.where(_rel(s, "SACRED_BARK"), 0.6, 0.3)
+    s = heal(s, jnp.maximum(1, (s.max_hp.astype(jnp.float32) * pct).astype(I32)), fairy)
+    died = died & ~fairy
     # Lizard Tail: instead of dying, heal to half max hp (once)
-    lizard = died & _rel(s, "LIZARD_TAIL")
+    lizard = died & _rel(s, "LIZARD_TAIL") & ~_rel(s, "MARK_OF_THE_BLOOM")
     s = s._replace(rel=s.rel.at[tr.ID["LIZARD_TAIL"]].set(_rel(s, "LIZARD_TAIL") & ~lizard))
     s = heal(s, s.max_hp.astype(I32) // 2, lizard)
     s = s._replace(done=s.done | (died & ~lizard))
