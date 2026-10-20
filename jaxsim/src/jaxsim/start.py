@@ -57,7 +57,9 @@ def make_start(
     if not allow_unsupported:
         from jaxsim._core.tables import relics as tr
         rel_names = [r if isinstance(r, str) else r[0] for r in relics]
-        missing = sorted({n for n, _, _ in counts if n not in supported_cards()} | set(potions)
+        from jaxsim._core.tables import potions as tpo
+        missing = sorted({n for n, _, _ in counts if n not in supported_cards()}
+                         | {p for p in potions if p not in tpo.SUPPORTED_NAMES}
                          | {r for r in rel_names if r not in tr.SUPPORTED | tr.NO_EFFECT})
         if missing:
             raise ValueError(f"not implemented yet: {missing} (supported cards: jaxsim.supported_cards())")
@@ -86,7 +88,7 @@ def make_start(
 
 
 def supported_cards() -> tuple[str, ...]:
-    """Card names jaxsim implements. Potions: none yet."""
+    """Card names jaxsim implements."""
     from jaxsim._core.tables import cards
 
     return cards.SUPPORTED_NAMES

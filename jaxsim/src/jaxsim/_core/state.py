@@ -52,6 +52,9 @@ class State(NamedTuple):
     p_pen_nib: jax.Array      # Pen Nib status: the next attack deals double damage
     p_skills_played: jax.Array  # skills played this turn (Letter Opener)
     p_next_turn_block: jax.Array  # Self-Forming Clay
+    p_regen: jax.Array        # Regen Potion: heal at end of turn, then -1
+    p_lose_dex: jax.Array     # Speed Potion: dexterity lost at end of turn
+    p_pending_fb: jax.Array   # Fire Breathing damage queued behind a pending Warcry choice
     p_pending_draw: jax.Array  # draws triggered by hp loss (Runic Cube, Centennial Puzzle), done at the next draw
     # powers (amounts as the C++ statuses; combust_hp = Combust cards played, the C++ combustHpLoss)
     p_metallicize: jax.Array

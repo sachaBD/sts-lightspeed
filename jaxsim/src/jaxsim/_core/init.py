@@ -22,7 +22,9 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
         & jnp.all((start.potions == 0) == (start.potion_count == 0))
         & (start.potion_count.sum() <= start.potion_capacity) & (start.potion_capacity <= spec.P)
     )
-    supported = jnp.all((count == 0) | (rows[:, tc.col("supported")] == 1)) & jnp.all(start.potions == 0)
+    from jaxsim._core.tables import potions as tpo
+    pot_ok = jnp.asarray(tpo.TABLE)[jnp.clip(start.potions.astype(I32), 0, len(tpo.TABLE) - 1), tpo.col("supported")] == 1
+    supported = jnp.all((count == 0) | (rows[:, tc.col("supported")] == 1)) & jnp.all((start.potions == 0) | pot_ok)
     err = jnp.where(valid, U32(0), U32(api.ERR_INVALID_START)) | jnp.where(supported, U32(0), U32(api.ERR_UNSUPPORTED))
     bad = err != 0
     s = State(
@@ -34,7 +36,7 @@ def init(spec: api.EnvSpec, start: api.StartSpec, key, forced=None) -> State:
         p_str=I16(0), p_dex=I16(0), p_vuln=I16(0), p_weak=I16(0), p_frail=I16(0), p_ja=I16(0), p_lose_str=I16(0), p_no_draw=I16(0), p_energy_per_turn=I16(3), p_intangible=I16(0), p_cards_played=I16(0), p_attacks_played=I16(0), p_artifact=I16(0), p_buffer=I16(0),
         p_thorns=I16(0), p_plated=I16(0), r_happy_flower=I16(0), r_incense=I16(0), r_pen_nib=I16(0), r_ink=I16(0),
         r_nunchaku=I16(0), r_sundial=I16(0), p_pen_nib=I16(0), p_skills_played=I16(0), p_next_turn_block=I16(0),
-        p_pending_draw=I16(0),
+        p_pending_draw=I16(0), p_regen=I16(0), p_lose_dex=I16(0), p_pending_fb=I16(0),
         rel=jnp.zeros(spec.n_relics, bool).at[jnp.clip(start.relics.astype(I32), 0, spec.n_relics - 1)].set(start.relics > 0),
         p_metallicize=I16(0), p_demon_form=I16(0), p_barricade=I16(0), p_brutality=I16(0), p_combust=I16(0), p_combust_hp=I16(0), p_corruption=I16(0), p_dark_embrace=I16(0), p_evolve=I16(0), p_fnp=I16(0), p_fire_breathing=I16(0), p_juggernaut=I16(0), p_rage=I16(0), p_rupture=I16(0), p_flame_barrier=I16(0),
         relics=start.relics.astype(I16), relic_ctr=z(spec.R), potions=start.potions.astype(I16),

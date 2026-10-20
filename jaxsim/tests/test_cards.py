@@ -269,3 +269,20 @@ def test_velvet_choker_limits_plays_to_six():
     start = jaxsim.make_start(["ANGER"] * 3, hp=50, relics=["VELVET_CHOKER"])
     s = env.init(start, jax.random.key(0))._replace(p_cards_played=I16(6))
     assert not bool(env.legal_mask(s)[: env.spec.D].any())
+
+
+def test_potions_drink_and_fairy_revives():
+    env = jaxsim.make_env()
+    start = jaxsim.make_start(["STRIKE_RED"] * 10, hp=50, potions=["FIRE_POTION", "FIRE_POTION"])
+    s = env.init(start, jax.random.key(0))
+    p = env.spec.potion_action(0)
+    assert bool(env.legal_mask(s)[p])
+    s = env.step(s, jnp.int32(p), jax.random.key(1))
+    o = env.observe(s)
+    assert int(o.enemy[0]) == 440 - 20 and int(o.potion_counts[0]) == 1
+    start = jaxsim.make_start(["STRIKE_RED"] * 10, hp=1, max_hp=80, potions=["FAIRY_POTION"])
+    s = env.init(start, jax.random.key(0))
+    assert not bool(env.legal_mask(s)[env.spec.potion_action(0)])      # Fairy is passive
+    from jaxsim._core import champ
+    s = env.step(s._replace(e_move=I16(champ.HEAVY_SLASH)), jnp.int32(env.spec.END_TURN), jax.random.key(1))
+    assert not env.outcome(s).done and int(env.outcome(s).hp) == 24   # revived at 30%

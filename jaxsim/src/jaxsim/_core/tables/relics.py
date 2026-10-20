@@ -37,6 +37,8 @@ SUPPORTED = {
     "MARK_OF_THE_BLOOM",
     # batch 2: turn / pile triggers
     "ORICHALCUM", "CALIPERS", "ICE_CREAM", "POCKETWATCH", "CHARONS_ASHES", "SUNDIAL", "UNCEASING_TOP",
+    # potion relics
+    "SACRED_BARK", "TOY_ORNITHOPTER",
 }
 
 ID = {n: i for i, n in enumerate(ids.RELICS)}

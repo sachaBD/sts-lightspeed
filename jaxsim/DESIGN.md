@@ -161,7 +161,10 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
   Ashes, Sundial, Unceasing Top. On-use relic actions are queued behind the card, so for a card with a choice
   they apply after the choice (counters update at play). Runic Cube / Centennial Puzzle are implemented but not
   yet enabled (their end-of-turn draws need harness support).
-- No potions yet.
+- Potions (`_core/potions.py`): Block, Blood, Dexterity, Energy, Explosive, Fear, Fire, Flex, Fruit Juice,
+  Strength, Swift, Weak, Ancient, Essence of Steel, Heart of Iron, Liquid Bronze, Ghost in a Jar, Regen, Speed,
+  Blessing of the Forge, Fairy in a Bottle (passive revive); Sacred Bark doubles, Toy Ornithopter heals 5.
+  Potion slots are identities with counts; there is no discard action.
 - `make_start` rejects anything else.
 - The card table's cost, type, exhausts and ethereal values are checked against the C++ card data (`test_card_table_matches_cpp`).
 
