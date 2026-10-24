@@ -25,6 +25,10 @@ class Oracle:
     def step(self, bits):
         return self._req(dict(cmd="step", bits=bits))
 
+    def set(self, **fields):
+        """Scenario setup on the current fight (see oracle.cpp `set`)."""
+        return self._req(dict(cmd="set", **fields))
+
     def cards(self):
         return self._req(dict(cmd="cards"))["cards"]
 

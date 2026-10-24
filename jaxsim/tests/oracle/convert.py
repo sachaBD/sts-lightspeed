@@ -13,6 +13,7 @@ MS = {n: i for i, n in enumerate(jaxsim.MONSTER_STATUS_NAMES)}
 CPP_CARD = {n: i for i, n in enumerate(ids.CARDS_CPP)}
 CPP_RELIC = {n: i for i, n in enumerate(ids.RELICS_CPP)}
 CPP_POTION = {n: i for i, n in enumerate(ids.POTIONS_CPP)}
+CPP_MOVE = {n: i for i, n in enumerate(ids.MOVES_CPP)}
 POTION = {n: i for i, n in enumerate(jaxsim.POTION_NAMES)}
 PILES = ("draw", "hand", "discard", "exhaust")  # api.PILE_* order
 ACTION_CARD, ACTION_POTION, ACTION_SELECT, ACTION_END_TURN = 0, 1, 2, 4
@@ -89,6 +90,13 @@ def expected(state, obs, D) -> dict:
         "done": state["outcome"] != 0,
         "won": state["outcome"] == OUTCOME_VICTORY,
     }
+
+
+def result(state) -> dict:
+    """The C++ fight result: done, won, hp and max hp."""
+    p = state["player"]
+    return {"done": state["outcome"] != 0, "won": state["outcome"] == OUTCOME_VICTORY,
+            "player": np.array([p["hp"], p["max_hp"]])}
 
 
 def potion_counts(state, obs) -> np.ndarray:

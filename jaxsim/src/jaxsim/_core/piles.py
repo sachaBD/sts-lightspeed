@@ -134,11 +134,21 @@ def draw_cards(spec: api.EnvSpec, s: State, n, key, forced, status_first=True):
         left = jnp.maximum(f - group.astype(I32) @ (d1 - t0 + d2), 0)
         forced = forced._replace(draw=jnp.where(first, left, 0).astype(forced.draw.dtype))
     shuffled = k2 > 0
+    # shuffle events (onShuffle) as BattleContext::drawCards counts them: one when the draw pile holds fewer cards
+    # than the draw (capped by hand room, not by the cards left), and a second when draw + discard together are
+    # still too few (the re-queued draw finds the reshuffled pile short again, even with an empty discard)
+    amt = jnp.where(go & (draw.sum() + disc.sum() > 0), jnp.maximum(jnp.minimum(n, spec.H - hand.sum()), 0), 0)
+    first = draw.sum() < amt
+    n_shuffle = first.astype(I32) + (first & (disc.sum() > 0) & (draw.sum() + disc.sum() < amt))
     # Sundial: every 3rd shuffle gives 2 energy
     from jaxsim._core.tables import relics as tr
-    sun = s.rel[tr.ID["SUNDIAL"]] & shuffled
-    s = s._replace(r_sundial=jnp.where(sun, jnp.where(s.r_sundial == 2, 0, s.r_sundial + 1), s.r_sundial).astype(I16),
-                   energy=(s.energy + 2 * (sun & (s.r_sundial == 2))).astype(I16))
+    has_sun = s.rel[tr.ID["SUNDIAL"]]
+    ctr, energy = s.r_sundial.astype(I32), s.energy.astype(I32)
+    for i in range(2):
+        sun = has_sun & (n_shuffle > i)
+        energy = energy + 2 * (sun & (ctr == 2))
+        ctr = jnp.where(sun, jnp.where(ctr == 2, 0, ctr + 1), ctr)
+    s = s._replace(r_sundial=ctr.astype(I16), energy=energy.astype(I16))
     gone = jnp.minimum(k, n_known)                            # known top cards drawn: forget them
     kt_new = jnp.where(gone >= 2, jnp.full_like(kt, -1), jnp.where(gone == 1, jnp.stack([kt[1], -1]), kt))
     s = s._replace(known_top=kt_new.astype(I16))

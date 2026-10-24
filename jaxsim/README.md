@@ -65,8 +65,8 @@ Details and the reasons behind them: [DESIGN.md](DESIGN.md). Out-of-scope conten
 ```
 uv sync                          # Python 3.12 + JAX (CPU)
 uv sync --extra cuda             # NVIDIA GPU
-uv run pytest                    # contract, card and 60 parity fights (~25 s; parity needs the oracle)
-PARITY_FIGHTS=300 uv run pytest  # full parity run, before merging big changes
+uv run pytest                    # contract, data checks, oracle scenarios (~45 s; needs an up-to-date oracle)
+PARITY_FIGHTS=60 uv run pytest   # random-deck parity fights: a diagnostic for hunting differences
 tools/build_oracle.sh            # build the C++ oracle (macOS: may need SDKROOT=.../MacOSX26.5.sdk)
 uv run python bench/bench_step.py 4096
 uv run python tools/gen_ids.py   # regenerate ids after C++ enum changes

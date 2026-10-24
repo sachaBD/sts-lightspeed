@@ -82,15 +82,15 @@ bench/bench_step.py      random-policy throughput
 
 ## Validation
 
-`tests/test_parity.py` plays random-deck fights (60 by default, `PARITY_FIGHTS=300` for the full run) against the C++ simulator (the `jaxsim_oracle` process,
-built by `tools/build_oracle.sh`) and compares every step: piles, player, enemy, statuses, turn, outcome and
+`tests/test_scenarios.py` (the gate) plays small fixed fights against the C++ simulator (the `jaxsim_oracle` process,
+built by `tools/build_oracle.sh`): one per card, relic and potion, combination decks, and hand-set rule cases
+(oracle `set`: piles, energy, block, hp, Champ hp and intent). Random-deck fights (`tests/test_parity.py`) are an
+opt-in diagnostic (`PARITY_FIGHTS=N`). Both compare every step: piles, player, enemy, statuses, turn, outcome and
 the legal-action set. Once the fight is over only the result is compared (done, won, hp, max hp): effects still
 queued after the end (e.g. a Dark Embrace draw after the killing blow) are not modelled.
 - The C++'s random outcomes are injected into JAX through the private forced path (`_core/rand.py`):
   - drawn cards: the hand difference before and after;
   - Champ rolls: replayed from a copy of `aiRng`.
-- Half the fights use a uniform random policy. The other half always play cards and start at 300 HP, so they
-  reach phase 2, Execute and wins.
 - Coverage: `uv run python -m tests.oracle.coverage`.
 
 C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
