@@ -12,8 +12,10 @@
 - `apps/common/launch.sh` needed a macOS bash 3.2 fix for empty arrays (done).
 
 ## Tests
-- `uv run pytest`: about 30 s. Contract, data checks, targeted card tests, 60 parity fights.
-- `PARITY_FIGHTS=300 uv run pytest`: the full parity run, before big merges.
+- `uv run pytest`: about 45 s. Contract, data checks, oracle scenarios (`tests/test_scenarios.py`: every card, relic
+  and potion, combo decks, hand-set rule cases). It fails if the oracle is missing or older than the C++ sources
+  (`JAXSIM_NO_ORACLE=1` skips oracle tests). `SCENARIO=substring` runs matching scenarios only.
+- `PARITY_FIGHTS=N uv run pytest tests/test_parity.py`: random-deck fights, a diagnostic (not a gate).
 - `uv run python -m tests.oracle.coverage`: plays per card, outcomes, Champ moves (C++ side). Use it to check
   new cards are actually exercised.
 - sts-ml: `PYTHONPATH=. .venv/bin/python -m agents.combat.az.test_az`.
@@ -25,7 +27,8 @@
 3. Cost, type, exhaust and ethereal are checked against C++ automatically
    (`test_card_table_matches_cpp`). A mismatch is either your typo or a C++ bug; check the real game.
 4. Run parity. Mismatches print the slot table and the C++ player state.
-5. Add a targeted test in `tests/test_cards.py` for any rare rule random play won't reach.
+5. Card, relic and potion scenarios are generated automatically. For a rare rule, add a hand-set case to `RULES` in
+   `tests/test_scenarios.py` (piles, fields, scripted actions; compared with the C++ every step).
 6. Update `DESIGN.md` (supported list, any C++ behaviour copied) and these notes if you learned something.
 
 ## How the parity harness works (`tests/test_parity.py`, `tests/oracle/`)

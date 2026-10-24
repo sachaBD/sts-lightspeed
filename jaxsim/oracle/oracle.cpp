@@ -7,6 +7,9 @@
 //    "potion_capacity":2}                                  -> {"state":..., "actions":[...], "ai_rolls":[...]}
 //   {"cmd":"step","bits":B}                                -> {"state":..., "actions":[...], "ai_rolls":[...]}
 //   {"cmd":"cards"}                                        -> {"cards":[[id, upgraded, cost, type, exhausts, ethereal]]}
+//   {"cmd":"set", optional "enemy_hp","enemy_move","energy","block","hp", "hand","draw","discard","exhaust"}
+//                                                          -> {"state":..., "actions":[...]}  (scenario setup; piles are
+//                                                             [[card, upgrades(, misc)]], draw top first)
 //
 // ai_rolls: the aiRng.random(99) values consumed by the request (The Champ's move rolls), recovered by replaying
 // a copy of aiRng. Errors: {"error":"..."}. Ascension 20, act 2 boss room, encounter CHAMP.
@@ -196,6 +199,46 @@ GameContext make_game(const Json& r) {
     return gc;
 }
 
+CardInstance card_of(const Json& c) {  // [id, upgrades(, misc)], as in the deck
+    Card card{static_cast<CardId>(c.at(0).get<int>())};
+    for (int i = 0; i < c.at(1).get<int>(); ++i) card.upgrade();
+    if (c.size() > 2) card.misc = static_cast<std::int16_t>(c.at(2).get<int>());
+    return CardInstance{card};
+}
+
+// Scenario setup on the current fight. Piles, when given, replace all four piles (draw listed top first) with new
+// card instances, keeping CardManager's counters (strikes, Normality, Pain, Blood for Blood) consistent.
+void set_fields(BattleContext& bc, const Json& r) {
+    auto& m = bc.monsters.arr[0];
+    if (r.contains("enemy_hp")) m.curHp = r.at("enemy_hp").get<int>();
+    if (r.contains("enemy_move")) m.moveHistory[0] = static_cast<MonsterMoveId>(r.at("enemy_move").get<int>());
+    if (r.contains("energy")) bc.player.energy = r.at("energy").get<int>();
+    if (r.contains("block")) bc.player.block = r.at("block").get<int>();
+    if (r.contains("hp")) bc.player.curHp = r.at("hp").get<int>();
+    if (!r.contains("hand")) return;
+    auto& cm = bc.cards;
+    cm.cardsInHand = 0;
+    cm.drawPile.clear();
+    cm.discardPile.clear();
+    cm.exhaustPile.clear();
+    cm.handNormalityCount = cm.handPainCount = cm.strikeCount = 0;
+    cm.handBloodCardCount = cm.drawPileBloodCardCount = cm.discardPileBloodCardCount = 0;
+    const auto fresh = [&](const Json& j) {
+        auto c = card_of(j);
+        c.uniqueId = static_cast<std::int16_t>(cm.nextUniqueCardId++);
+        return c;
+    };
+    for (const auto& j : r.at("hand")) { auto c = fresh(j); cm.notifyAddCardToCombat(c); cm.moveToHand(c); }
+    const auto draw = r.value("draw", Json::array());
+    for (auto it = draw.rbegin(); it != draw.rend(); ++it) {  // back of drawPile = top
+        auto c = fresh(*it);
+        cm.notifyAddCardToCombat(c);
+        cm.moveToDrawPileTop(c);
+    }
+    for (const auto& j : r.value("discard", Json::array())) { auto c = fresh(j); cm.notifyAddCardToCombat(c); cm.moveToDiscardPile(c); }
+    for (const auto& j : r.value("exhaust", Json::array())) cm.exhaustPile.push_back(fresh(j));
+}
+
 }  // namespace
 
 int main() {
@@ -232,6 +275,10 @@ int main() {
                 a.execute(*bc);
                 resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(before, bc->aiRng)},
                         {"drawn", drawn_json(draw_b, disc_b, hand_b, a.getActionType() == search::ActionType::END_TURN, left_hand, limbo, *bc)}, {"exhausted", exhausted_json(hand_b, exh_b, *bc)}};
+            } else if (cmd == "set") {
+                if (!bc) throw std::runtime_error{"no fight"};
+                set_fields(*bc, r);
+                resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}};
             } else if (cmd == "cards") {
                 Json cards = Json::array();
                 for (int id = 1; id < static_cast<int>(CardId::ZAP) + 1; ++id) {

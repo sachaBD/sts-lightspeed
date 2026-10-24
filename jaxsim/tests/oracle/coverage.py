@@ -1,19 +1,19 @@
 """Coverage of the parity fights' decks and policies, measured on the C++ side only: outcomes, Champ moves and
 plays per card. Run: uv run python -m tests.oracle.coverage"""
 import collections
+import os
 import random
 
 from jaxsim._core.tables import ids
-from tests import test_parity as T
-from tests.oracle import convert
+from tests.oracle import convert, decks
 from tests.oracle.client import Oracle
 
 
 def main():
     moves, outcomes, phase2, played = (collections.Counter(), collections.Counter(), 0, collections.Counter())
-    for fight in range(T.FIGHTS):
+    for fight in range(int(os.environ.get("PARITY_FIGHTS", "300"))):
         rng = random.Random(fight)
-        deck, hp = T.fight_setup(rng, fight)
+        deck, hp = decks.fight_setup(rng, fight)
         o = Oracle()
         r = o.start(seed=1000 + fight, hp=hp, max_hp=max(hp, 80), deck=convert.cpp_deck(deck))
         p2 = False
