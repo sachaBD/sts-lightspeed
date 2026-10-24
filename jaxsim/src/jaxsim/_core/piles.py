@@ -2,7 +2,7 @@
 
 Drawing k cards from a uniformly shuffled pile is the same as choosing k of its cards uniformly without
 replacement, so a draw is one vectorised sample (each card copy gets a random key; the k smallest are drawn)
-instead of a loop of single draws. On-draw triggers (Evolve, Fire Breathing) are computed from what was drawn.
+instead of a loop of single draws. The on-draw trigger (Fire Breathing) is computed from what was drawn.
 """
 import jax
 import jax.numpy as jnp
@@ -12,7 +12,6 @@ from jaxsim._core.state import I16, I32, U32, State
 
 MAX_PILE = 128      # card copies in draw + discard that a draw can reach (more sets ERR_QUEUE_OVERFLOW)
 MAX_DRAW = 10       # cards per draw: the hand holds at most 10
-EVOLVE_ROUNDS = 10  # a draw plus up to 9 Evolve rounds: each round adds >= 1 card and the hand holds 10
 
 
 def find_or_alloc(s: State, card, up, cost, misc, want=True):
@@ -160,26 +159,16 @@ def draw_cards(spec: api.EnvSpec, s: State, n, key, forced, status_first=True):
     return s, forced, d1 + d2
 
 
-def draw(spec: api.EnvSpec, s: State, n, key, forced, extend: bool, fire_now=True):
-    """Draw n cards with on-draw triggers (CardManager::draw): each Status queues Evolve draws, each Status or
-    Curse makes Fire Breathing damage the enemy. extend: Evolve draws follow in this draw (up to EVOLVE_ROUNDS);
-    otherwise they are returned for a later draw. fire_now False: Fire Breathing damage is returned instead of
-    dealt (end-of-turn Dark Embrace draws: it lands after the Champ's block reset).
-    Returns (state, forced, Evolve draws not yet done, Fire Breathing damage deferred)."""
+def draw(spec: api.EnvSpec, s: State, n, key, forced, fire_now=True, status_first=True):
+    """Draw n cards with the on-draw trigger (CardManager::draw): each Status or Curse makes Fire Breathing damage
+    the enemy. fire_now False: the damage is returned instead of dealt (end-of-turn Dark Embrace draws: it lands
+    after the Champ's block reset). status_first: forced-path ordering only (see draw_cards).
+    Returns (state, forced, Fire Breathing damage deferred)."""
     from jaxsim._core import cards, hooks
     types = cards.rows(s)[:, cards.C("type")]
-    keys = jax.random.split(key, EVOLVE_ROUNDS)
-    pending = jnp.asarray(n, I32)
-    later = jnp.zeros((), I32)
-    deferred = jnp.zeros((), I32)
-    for r in range(EVOLVE_ROUNDS if extend else 1):
-        s, forced, drawn = draw_cards(spec, s, pending, keys[r], forced, status_first=extend | fire_now)
-        statuses = jnp.sum(jnp.where(types == cards.tc.STATUS, drawn, 0))
-        curses = jnp.sum(jnp.where(types == cards.tc.CURSE, drawn, 0))
-        fb = (statuses + curses) * s.p_fire_breathing.astype(I32)
-        s = hooks.hurt_enemy(s, fb, ~s.done & (fb > 0) & fire_now)
-        deferred = deferred + jnp.where(fire_now, 0, fb)
-        pending = statuses * s.p_evolve.astype(I32)
-        if not extend:
-            later = pending
-    return s, forced, later, deferred
+    s, forced, drawn = draw_cards(spec, s, jnp.asarray(n, I32), key, forced, status_first=status_first)
+    statuses = jnp.sum(jnp.where(types == cards.tc.STATUS, drawn, 0))
+    curses = jnp.sum(jnp.where(types == cards.tc.CURSE, drawn, 0))
+    fb = (statuses + curses) * s.p_fire_breathing.astype(I32)
+    s = hooks.hurt_enemy(s, fb, ~s.done & (fb > 0) & fire_now)
+    return s, forced, jnp.where(fire_now, 0, fb)

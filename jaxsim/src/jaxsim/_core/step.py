@@ -4,13 +4,10 @@ One step = one decision. Both decision kinds are computed and selected (branch-f
 shared draws that follow the C++ action-queue order:
 
     play card:  play_pre  -> draw A (the card's own draws) -> play_post (card leaves, exhaust triggers,
-                Juggernaut) -> draw B (Dark Embrace / Evolve draws)
+                Juggernaut) -> draw B (Dark Embrace draws)
     END_TURN:   end_pre (Metallicize, Burn, Combust, end-of-turn powers, ethereal exhaust, discard)
                 -> draw A (Dark Embrace draws from ethereal exhaust) -> end_mid (Champ turn, end of round,
-                next turn start, Brutality) -> draw B (5 + Brutality + Evolve) -> Demon Form, energy
-
-Ethereal-exhaust Dark Embrace draws trigger Evolve after the Champ's turn here (the C++ queues those Evolve
-draws behind the monster turn start); only Fire Breathing timing on such a draw could differ.
+                next turn start, Brutality) -> draw B (5 + Brutality) -> Demon Form, energy
 """
 import jax
 import jax.numpy as jnp
@@ -70,10 +67,7 @@ def end_pre(spec: api.EnvSpec, s: State, key, forced):
     s = relics.debuff_player(s, "p_dex", 0, -jnp.where(~s.done, s.p_lose_dex.astype(I32), 0))
     s = s._replace(p_lose_dex=I16(0))
     s = s._replace(p_lose_str=I16(0), p_no_draw=I16(0), p_rage=I16(0))
-    # draws triggered by hp loss so far this end of turn (Runic Cube, Centennial Puzzle) happen now, before the
-    # discard (the C++ adds them to the top of the queue)
-    s, forced, _, _ = piles.draw(spec, s, jnp.where(s.done, 0, s.p_pending_draw.astype(I32)), key, forced, extend=False)
-    s = s._replace(p_pending_draw=I16(0))
+    # (Runic Cube / Centennial Puzzle would draw here, before the discard; both relics are disabled, #29)
     # ethereal cards exhaust (with triggers), the rest of the hand is discarded
     s, _, j2, de = cards.exhaust_hand(s, r[:, tc.col("ethereal")] == 1, ~s.done)
     p = s.piles.astype(I32)
@@ -189,13 +183,12 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
     mid = tree_where(is_end, ended, acted)
     forced = forced if forced is None else tree_where(is_end, forced_end, forced)
     warcry_play = ~pending0 & ~is_end & ~is_potion & (kind == tc.CH_WARCRY)
-    mid, forced, evolve_later, fb_late = piles.draw(spec, mid, jnp.where(is_end, n_de, n_a), k_a, forced,
-                                                    extend=False, fire_now=~is_end & ~warcry_play)
+    fire_now = ~is_end & ~warcry_play
+    mid, forced, fb_late = piles.draw(spec, mid, jnp.where(is_end, n_de, n_a), k_a, forced, fire_now=fire_now,
+                                      status_first=fire_now)
     # Warcry's choice comes after its own draws
     post_kind = jnp.where(~pending0 & ~pend_a & ~is_end & ~is_potion & (kind == tc.CH_WARCRY), kind, 0)
-    # (a pending Warcry choice stores the Evolve draws its own draws triggered; they happen after the pick)
-    mid, pend_b, jugg, trig = choice.choice_point(spec, mid, post_kind, d, jugg, trig + evolve_later)
-    trig = trig - evolve_later
+    mid, pend_b, jugg, trig = choice.choice_point(spec, mid, post_kind, d, jugg, trig)
     pending = ~pending0 & (pend_a | pend_b) & ~is_end & ~is_potion
     # Fire Breathing from Warcry's own draws is queued behind its choice: now, or after the pick
     fb_warcry = jnp.where(warcry_play, fb_late, 0)
@@ -207,21 +200,20 @@ def step(spec: api.EnvSpec, s: State, action, key, forced=None) -> State:
                                                  & ~pend_b)
     jugg = jugg + ev_w
     trig = trig + warcry_draw
-    evolve_later = jnp.where(pend_b, 0, evolve_later)
 
     left, trig2 = cards.play_post(spec, mid, limbo, jugg, ~pending & ~is_potion)
     left = hooks.juggernaut(left, jnp.where(is_potion, jugg, 0))
     turned, n_hand, energy_bonus = end_mid(spec, mid, roll, jugg_late, fb_late)
     mid = tree_where(is_end, turned, left)
-    n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2 + mid.p_pending_draw)) + evolve_later
+    n_b = jnp.where(is_end, n_hand, jnp.where(pending, 0, trig + trig2 + mid.p_pending_draw))
     mid = mid._replace(p_pending_draw=jnp.where(is_end | pending, mid.p_pending_draw, I16(0)))
     k_b, k_top = jax.random.split(k_b)
     energy_before_draw = mid.energy
-    mid, forced, _, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced, extend=True)
+    mid, forced, _ = piles.draw(spec, mid, jnp.where(mid.done, 0, n_b), k_b, forced)
     # Unceasing Top: an empty hand during the turn draws a card
     top = (~is_end & ~pending & ~mid.done & mid.rel[relics_tr.ID["UNCEASING_TOP"]]
            & (mid.piles[api.PILE_HAND].sum() == 0))
-    mid, _, _, _ = piles.draw(spec, mid, jnp.where(top, 1, 0), k_top, forced, extend=True)
+    mid, _, _ = piles.draw(spec, mid, jnp.where(top, 1, 0), k_top, forced)
     nxt = end_post(mid, is_end, energy_bonus, energy_before_draw)
 
     # the C++ can't-win rule (executeActions): no cards in hand, draw or discard and no damage without cards

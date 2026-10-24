@@ -49,7 +49,7 @@ import jax
 
 from jaxsim._core.tables import ids as _ids
 
-CONTRACT = "jaxsim_champ_v4"  # v2: Obs.player gains energy per turn; v3: StartSpec.misc; v4: relic data
+CONTRACT = "jaxsim_champ_v1.0"
 
 __all__ = [
     "CONTRACT", "EnvSpec", "DEFAULT_SPEC", "StartSpec", "Obs", "Outcome", "Env", "make_env",
@@ -173,7 +173,8 @@ class Obs(NamedTuple):
                                #     (Champ AI state: defensive stances used + 4 * phase 2)
     enemy_status: jax.Array    # [n_monster_status] amount per status id
     relics: jax.Array          # [R] relic ids
-    relic_counters: jax.Array  # [R] per-relic counter (Pen Nib, Nunchaku, ...), 0 if none
+    relic_counters: jax.Array  # [R] counter of the relic in each slot (Pen Nib, Ink Bottle, Nunchaku, Sundial,
+                               #     Happy Flower, Incense Burner), 0 if none
     potions: jax.Array         # [P] potion ids, 0 = empty
     potion_counts: jax.Array   # [P] copies held
     potion_capacity: jax.Array  # []

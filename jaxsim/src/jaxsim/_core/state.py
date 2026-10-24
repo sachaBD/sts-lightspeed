@@ -65,7 +65,6 @@ class State(NamedTuple):
     p_combust_hp: jax.Array
     p_corruption: jax.Array
     p_dark_embrace: jax.Array
-    p_evolve: jax.Array
     p_fnp: jax.Array
     p_fire_breathing: jax.Array
     p_juggernaut: jax.Array
@@ -73,7 +72,6 @@ class State(NamedTuple):
     p_rupture: jax.Array
     p_flame_barrier: jax.Array
     relics: jax.Array         # [R] ids (observation only for now)
-    relic_ctr: jax.Array      # [R]
     potions: jax.Array        # [P] ids
     potion_n: jax.Array       # [P] counts
     potion_cap: jax.Array

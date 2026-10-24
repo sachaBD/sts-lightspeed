@@ -12,8 +12,8 @@
 
 ## The contract (`src/jaxsim/api.py`)
 - `Env(spec, init, step, legal_mask, observe, outcome)`: pure, single-game functions. Callers `vmap`/`jit`.
-- `CONTRACT = "jaxsim_champ_v2"`. **Bump it on any observation, action or semantic change once a consumer
-  exists**, and update `AZNet` in sts-ml.
+- `CONTRACT = "jaxsim_champ_v1.0"`. Pinned in sts-ml (`AZNet`); no consumer has used it yet, so changes stay v1.0
+  until the user says otherwise.
 - Actions: `[0, D)` play or pick slot d; `D` END_TURN; `D+1..D+P` potions; `D+P+1` DONE (choices).
 - `Obs`:
   - integer arrays: slots (card, upgraded, cost, misc), `piles [5, D]` (draw, hand, discard, exhaust,
@@ -40,10 +40,10 @@ Both the play and END_TURN paths are computed and merged with full-state selects
 merges and the illegal/terminal guard). The pipeline follows the C++ action-queue order:
 ```
 play:  cards.play_pre -> draw A (own draws) -> cards.play_post (card leaves, exhaust triggers,
-       Juggernaut) -> draw B (Dark Embrace / Evolve)
+       Juggernaut) -> draw B (Dark Embrace)
 end:   end_pre (Metallicize, Burn, Combust, end-of-turn powers, ethereal exhaust, discard)
        -> draw A (Dark Embrace) -> end_mid (champ.take_turn hit by hit, end of round, turn start,
-       Brutality) -> draw B (5 + Brutality + Evolve) -> end_post (Demon Form, energy)
+       Brutality) -> draw B (5 + Brutality) -> end_post (Demon Form, energy)
 ```
 
 ## Files
@@ -52,7 +52,7 @@ end:   end_pre (Metallicize, Burn, Combust, end-of-turn powers, ethereal exhaust
 | `_core/tables/cards.py` | Card table: one row per (card, upgraded) with effect columns + `special` enum + `power` column |
 | `_core/cards.py` | `playable`, `play_pre`, `play_post`, damage/block formulas, `exhaust_hand`, powers |
 | `_core/hooks.py` | Event helpers: `gain_block` (Juggernaut events), `hurt_enemy`, `lose_hp` (Rupture, Blood for Blood, death), `damage_player_hits`, `on_exhaust` |
-| `_core/piles.py` | `find_or_alloc`, vectorised `draw_cards` (one top-k sample; discard copies rank after the draw pile = reshuffle), `draw` with Evolve rounds and Fire Breathing |
+| `_core/piles.py` | `find_or_alloc`, vectorised `draw_cards` (one top-k sample; discard copies rank after the draw pile = reshuffle), `draw` with Fire Breathing |
 | `_core/champ.py` | A20 Champ: `roll` (AI), `take_turn`, `end_of_round`, `is_attack` |
 | `_core/init.py` | StartSpec → State, validation, innate cards, opening draw, first Champ roll |
 | `_core/rand.py` | `Forced` (C++ outcomes for parity): draw multiset + Champ roll |

@@ -23,7 +23,7 @@ def random_rollout(env, s, key, n):
 
 
 def test_contract_version():
-    assert jaxsim.CONTRACT == "jaxsim_champ_v4"
+    assert jaxsim.CONTRACT == "jaxsim_champ_v1.0"
 
 
 def test_action_layout(env):
@@ -128,3 +128,9 @@ def test_truncation_is_not_a_loss(start, key):
         states.append(env.step(states[-1], jnp.int32(env.spec.END_TURN), key))
     out = env.outcome(states[-1])
     assert out.done and out.truncated and not out.won and int(out.error) == 0
+
+
+def test_relic_counters_observed(env, key):
+    start = jaxsim.make_start(["STRIKE_RED"] * 10, hp=80, relics=[("ANCHOR", 0), ("PEN_NIB", 5)])
+    o = env.observe(env.init(start, key))
+    assert np.asarray(o.relic_counters)[:2].tolist() == [0, 5]

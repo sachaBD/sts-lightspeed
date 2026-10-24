@@ -16,8 +16,7 @@ Tracking issue: [#24](https://github.com/sachaBD/sts-lightspeed/issues/24).
 
 After playable:
 - [#22](https://github.com/sachaBD/sts-lightspeed/issues/22) robust testing;
-- [#23](https://github.com/sachaBD/sts-lightspeed/issues/23) performance pass on the GPU;
-- [#16](https://github.com/sachaBD/sts-lightspeed/issues/16) single-sample Evolve chain.
+- [#23](https://github.com/sachaBD/sts-lightspeed/issues/23) performance pass on the GPU.
 
 ## Flow
 

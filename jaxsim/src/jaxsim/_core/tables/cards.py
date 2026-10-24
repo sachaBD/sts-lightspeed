@@ -37,7 +37,7 @@ _COL = {c: i for i, c in enumerate(COLUMNS)}
 # power column: which player power a card adds power_amt to (BARRICADE / CORRUPTION are flags set to 1;
 # BERSERK raises energy per turn by 1 and applies power_amt Vulnerable to the player)
 POWERS = ("none", "metallicize", "demon_form", "barricade", "brutality", "combust", "corruption", "dark_embrace",
-          "evolve", "fnp", "fire_breathing", "juggernaut", "rage", "rupture", "flame_barrier", "berserk")
+          "fnp", "fire_breathing", "juggernaut", "rage", "rupture", "flame_barrier", "berserk")
 PW = {p: i for i, p in enumerate(POWERS)}
 
 _ID = {n: i for i, n in enumerate(ids.CARDS)}
@@ -113,7 +113,6 @@ _ROWS = {
     "COMBUST":         (dict(cost=1, type=POWER, power=PW["combust"], power_amt=5), dict(power_amt=7)),
     "CORRUPTION":      (dict(cost=3, type=POWER, power=PW["corruption"], power_amt=1), dict(cost=2)),
     "DARK_EMBRACE":    (dict(cost=2, type=POWER, power=PW["dark_embrace"], power_amt=1), dict(cost=1)),
-    "EVOLVE":          (dict(cost=1, type=POWER, power=PW["evolve"], power_amt=1), dict(power_amt=2)),
     "FEEL_NO_PAIN":    (dict(cost=1, type=POWER, power=PW["fnp"], power_amt=3), dict(power_amt=4)),
     "FIRE_BREATHING":  (dict(cost=1, type=POWER, power=PW["fire_breathing"], power_amt=6), dict(power_amt=10)),
     "JUGGERNAUT":      (dict(cost=2, type=POWER, power=PW["juggernaut"], power_amt=5), dict(power_amt=7)),

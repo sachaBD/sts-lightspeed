@@ -29,7 +29,8 @@ The C++ simulator in this repo is the trusted reference.
    - Drawing samples from the draw counts. That is equivalent to a uniformly shuffled pile, so the draw
      order is not hidden state. A draw of k cards is one vectorised sample (each copy gets a random key, the
      k smallest are drawn; discard copies rank after draw-pile copies, which is the reshuffle), not a loop.
-     On-draw triggers (Evolve, Fire Breathing) are computed from what was drawn, with enough Evolve rounds to fill the hand (exact).
+     The on-draw trigger (Fire Breathing) is computed from what was drawn. Evolve is not supported (it would need
+     chained draws).
    - Up to K_TOP=2 known top cards cover put-on-top effects.
    - Created cards reuse a slot with the same identity, or take a free one. If none is free,
      ERR_SLOT_OVERFLOW is set.
@@ -108,12 +109,10 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
   self-damage card. Perfected Strike counts Strike cards in hand, draw and discard plus itself, not exhaust.
 - Step order follows the C++ action queue (see `_core/step.py`):
   - playing a card: its effects, its own draws, the card leaving (exhaust triggers), Juggernaut, then triggered
-    draws (Dark Embrace, Evolve);
+    draws (Dark Embrace);
   - END_TURN: Metallicize, Burn, Combust, end-of-turn powers, ethereal exhaust (Feel No Pain, Dark Embrace),
     discard, Dark Embrace draws, the Champ's turn hit by hit (Flame Barrier hits back after each), end of
     round, next turn start (Barricade, draw 5, Brutality, Demon Form, energy).
-  - Evolve draws triggered by an end-of-turn Dark Embrace draw happen after the Champ's turn (the C++ queues
-    them behind the monster turn start); only Fire Breathing timing on such a draw could differ.
 - The first Corruption sets every skill's cost to 0 for the combat (CardManager::onBuffCorruption); later
   skills are free while it is active. Berserk raises energy per turn (no status in the C++): Obs.player[4].
 - Choices (`_core/choice.py`): a single pick from one pile. As in the C++, 0 valid copies does nothing, exactly
@@ -138,9 +137,9 @@ C++ behaviour that jaxsim copies on purpose (the C++ is the reference):
   - starter cards, PR #2's set, batch 1 of #5 (table rows and small columns) and batch 2 (formulas:
     Heavy Blade, Perfected Strike, Body Slam, Whirlwind, Searing Blow, Rampage, Blood for Blood, Sever Soul,
     Second Wind, Fiend Fire) and batch 3 (powers and hooks: Metallicize, Demon Form, Barricade, Berserk,
-    Brutality, Combust, Corruption, Dark Embrace, Evolve, Feel No Pain, Fire Breathing, Juggernaut, Rupture,
+    Brutality, Combust, Corruption, Dark Embrace, Feel No Pain, Fire Breathing, Juggernaut, Rupture,
     Rage, Flame Barrier) and batch 4 (choices: Armaments, Headbutt, True Grit, Warcry, Burning Pact, Dual Wield,
-    Exhume);
+    Exhume). Evolve is not supported;
   - curses: Decay, Doubt, Shame, Regret, Pain, Normality, Necronomicurse, Writhe, Clumsy, Injury, Parasite,
     Curse of the Bell;
   - colorless: Apparition, Bite, J.A.X., Ritual Dagger, Bandage Up, Blind, Trip, Flash of Steel, Swift Strike,

@@ -8,13 +8,26 @@ _PS = {n: i for i, n in enumerate(api.PLAYER_STATUS_NAMES)}
 _MS = {n: i for i, n in enumerate(api.MONSTER_STATUS_NAMES)}
 
 
+# relic -> the state field holding its counter (Obs.relic_counters, at the relic's slot)
+_COUNTERS = (("PEN_NIB", "r_pen_nib"), ("INK_BOTTLE", "r_ink"), ("NUNCHAKU", "r_nunchaku"), ("SUNDIAL", "r_sundial"),
+             ("HAPPY_FLOWER", "r_happy_flower"), ("INCENSE_BURNER", "r_incense"))
+
+
+def relic_counters(s: State):
+    from jaxsim._core.tables import relics as tr
+    ctr = jnp.zeros(s.relics.shape, I16)
+    for name, field in _COUNTERS:
+        ctr = jnp.where(s.relics == tr.ID[name], getattr(s, field).astype(I16), ctr)
+    return ctr
+
+
 def observe(spec: api.EnvSpec, s: State) -> api.Obs:
     ps = jnp.zeros((spec.n_player_status,), I16)
     for name, v in (("STRENGTH", s.p_str), ("DEXTERITY", s.p_dex), ("VULNERABLE", s.p_vuln),
                     ("WEAK", s.p_weak), ("FRAIL", s.p_frail), ("LOSE_STRENGTH", s.p_lose_str),
                     ("NO_DRAW", s.p_no_draw), ("METALLICIZE", s.p_metallicize), ("DEMON_FORM", s.p_demon_form),
                     ("BARRICADE", s.p_barricade), ("BRUTALITY", s.p_brutality), ("COMBUST", s.p_combust),
-                    ("CORRUPTION", s.p_corruption), ("DARK_EMBRACE", s.p_dark_embrace), ("EVOLVE", s.p_evolve),
+                    ("CORRUPTION", s.p_corruption), ("DARK_EMBRACE", s.p_dark_embrace),
                     ("FEEL_NO_PAIN", s.p_fnp), ("FIRE_BREATHING", s.p_fire_breathing),
                     ("JUGGERNAUT", s.p_juggernaut), ("RAGE", s.p_rage), ("RUPTURE", s.p_rupture),
                     ("FLAME_BARRIER", s.p_flame_barrier), ("INTANGIBLE", s.p_intangible), ("ARTIFACT", s.p_artifact),
@@ -31,7 +44,7 @@ def observe(spec: api.EnvSpec, s: State) -> api.Obs:
         piles=s.piles, known_top=s.known_top,
         player=jnp.stack([s.hp, s.max_hp, s.block, s.energy, s.p_energy_per_turn]), player_status=ps,
         enemy=jnp.stack([s.e_hp, s.e_max_hp, s.e_block, s.e_move, s.e_last, s.e_ai]), enemy_status=es,
-        relics=s.relics, relic_counters=s.relic_ctr, potions=s.potions,
+        relics=s.relics, relic_counters=relic_counters(s), potions=s.potions,
         potion_counts=s.potion_n, potion_capacity=s.potion_cap, choice=s.choice, turn=s.turn,
     )
 

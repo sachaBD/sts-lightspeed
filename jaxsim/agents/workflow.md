@@ -38,7 +38,7 @@
   (a card counts as drawn if it is in hand now and was in the draw/discard pile before, or it is the played or
   limbo card or a Warcry pick that came back; after END_TURN every pre-existing card in hand). The Champ roll
   comes from replaying a copy of `aiRng`.
-- Forced draws: known-top cards first (deterministic, no forced entry needed), then statuses first (Evolve), or
+- Forced draws: known-top cards first (deterministic, no forced entry needed), then statuses first, or
   non-statuses first for the end-turn Dark Embrace draw (Fire Breathing timing). Forced counts match by card
   group (card, upgrade, misc), so identity changes mid-step (Blood for Blood cost) don't break them.
 - `PARITY_DEBUG=1 uv run pytest -s ...` prints each select, the C++ hand/top of draw/enemy after each step, and

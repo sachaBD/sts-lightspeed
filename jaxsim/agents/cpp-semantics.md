@@ -9,7 +9,7 @@ ethereal, innate, strike tags). Then let parity tell you what you got wrong.
 - Card actions are queued addToBot in order. `OnAfterCardUsed` (the card leaving play) is queued **after**
   them, during `useCard`.
 - Triggers queued while actions run land **behind** `OnAfterCardUsed`: Juggernaut damage, Dark Embrace and
-  Evolve draws. That is why a step has two draw points.
+  draws. That is why a step has two draw points. (Evolve is not supported.)
 - `Action.clearOnCombatVictory`:
   - false for GainBlock, PlayerLoseHp, HealPlayer, DamagePlayer, OnAfterCardUsed, so they still run after the
     killing blow;

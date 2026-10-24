@@ -4,7 +4,7 @@ A play is split around the step's two draw points (step.py), matching the C++ qu
     play_pre   energy, self hp loss, exhaust-first effects (Fiend Fire, Second Wind), block, damage, specials,
                debuffs, buffs, powers, energy, Rage block          -> the card's own draws
     play_post  created cards, Battle Trance, the card leaving (exhaust triggers), Juggernaut damage
-                                                                     -> triggered draws (Dark Embrace, Evolve)
+                                                                     -> triggered draws (Dark Embrace)
 Returns carry the draw counts; Juggernaut events accumulate in the state-free return value.
 """
 import jax.numpy as jnp
@@ -23,7 +23,7 @@ _VELVET = _tr.ID["VELVET_CHOKER"]
 
 # power column -> state field (BARRICADE / CORRUPTION set a flag; BERSERK is handled separately)
 _ADD = {"metallicize": "p_metallicize", "demon_form": "p_demon_form", "brutality": "p_brutality",
-        "combust": "p_combust", "dark_embrace": "p_dark_embrace", "evolve": "p_evolve", "fnp": "p_fnp",
+        "combust": "p_combust", "dark_embrace": "p_dark_embrace", "fnp": "p_fnp",
         "fire_breathing": "p_fire_breathing", "juggernaut": "p_juggernaut", "rage": "p_rage",
         "rupture": "p_rupture", "flame_barrier": "p_flame_barrier"}
 _FLAG = {"barricade": "p_barricade", "corruption": "p_corruption"}
