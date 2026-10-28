@@ -70,7 +70,9 @@ void Player::gainBlock(BattleContext &bc, int amount) {
         return;
     }
 
-    block += amount;
+    // AbstractCreature.addBlock caps block at 999. Bound the increment before
+    // addition as well: repeated Entrench must not overflow the simulator int.
+    block = std::min(999, block + std::min(amount, 999));
 
     if (hasStatus<PS::JUGGERNAUT>()) {
         bc.addToBot(Actions::DamageRandomEnemy(getStatus<PS::JUGGERNAUT>()));
