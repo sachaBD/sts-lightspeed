@@ -1,0 +1,13 @@
+[project]
+name = "sts-lightspeed"
+version = "0.0.1"
+description = "Python names of sts_lightspeed's C++ constants"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sts_lightspeed"]
