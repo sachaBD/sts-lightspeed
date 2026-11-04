@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]  # sts-lightspeed
 HEADERS = ROOT / "include" / "constants"
 OUT = Path(__file__).resolve().parents[1] / "src" / "jaxsim" / "_core" / "tables" / "ids.py"
 ENUMS = ROOT / "python" / "src" / "sts_lightspeed" / "enums.py"
-ENUMS_VOCABS = ("RELICS", "POTIONS")  # those with a Python user
+ENUMS_VOCABS = ("CARDS", "RELICS", "POTIONS")  # those with a Python user
 
 VOCABS = {  # python name: (header, C++ enum, sentinels dropped)
     "CARDS": ("Cards.h", "CardId", {"INVALID"}),
