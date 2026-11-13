@@ -16,3 +16,16 @@ endif()
 # Opt-in regression executable; production/library builds do not build it by default.
 add_executable(sts_liquid_memories_test EXCLUDE_FROM_ALL tests/liquid_memories_test.cpp)
 target_link_libraries(sts_liquid_memories_test PRIVATE sts_lightspeed)
+
+add_executable(sts_action_transition_test EXCLUDE_FROM_ALL tests/action_transition_test.cpp)
+target_link_libraries(sts_action_transition_test PRIVATE sts_lightspeed)
+
+option(STS_LIGHTSPEED_BUILD_TESTS "Build and register simulator regression tests" OFF)
+if(STS_LIGHTSPEED_BUILD_TESTS)
+    enable_testing()
+    foreach(test_name IN ITEMS sts_liquid_memories_test sts_action_transition_test)
+        set_target_properties(${test_name} PROPERTIES EXCLUDE_FROM_ALL FALSE)
+        add_test(NAME ${test_name} COMMAND ${test_name})
+        set_tests_properties(${test_name} PROPERTIES TIMEOUT 30)
+    endforeach()
+endif()

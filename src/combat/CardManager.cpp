@@ -394,6 +394,7 @@ void CardManager::resetAttributesAtEndOfTurn() {
 // **************** BEGIN SPECIAL HELPERS ****************
 
 void CardManager::draw(BattleContext &bc, int amount) {
+    if (amount > 0) bc.noteDrawPileOrderAccess();
     int evolve = bc.player.getStatus<PS::EVOLVE>();
     int fireBreathing = bc.player.getStatus<PS::FIRE_BREATHING>();
 

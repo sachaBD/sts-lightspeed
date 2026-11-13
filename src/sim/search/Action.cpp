@@ -5,6 +5,7 @@
 #include "sim/search/Action.h"
 
 #include <functional>
+#include <tuple>
 
 namespace sts {
 
@@ -473,7 +474,7 @@ void executeMultiCardSelectActionHelper(BattleContext &bc, search::Action a) {
     }
 }
 
-void search::Action::execute(BattleContext &bc) const {
+search::TransitionEffects search::Action::execute(BattleContext &bc) const {
 #ifdef sts_asserts
     if (!isValidAction(bc)) {
         std::cerr << bc.seed << " " << static_cast<int>(getActionType()) << " " << getSourceIdx() << " " << getTargetIdx() << std::endl;
@@ -482,6 +483,17 @@ void search::Action::execute(BattleContext &bc) const {
         assert(false);
     }
 #endif
+
+    // Include the underlying state: nextInt/nextLong need not increment Random::counter.
+    const auto rngState = [&bc] {
+        const auto state = [](const Random &rng) {
+            return std::make_tuple(rng.counter, rng.seed0, rng.seed1);
+        };
+        return std::array{state(bc.aiRng), state(bc.cardRandomRng), state(bc.miscRng),
+                          state(bc.monsterHpRng), state(bc.potionRng), state(bc.shuffleRng)};
+    };
+    const auto beforeRng = rngState();
+    const auto beforeHidden = bc.hiddenInformationAccesses;
 
     switch (getActionType()) {
         case ActionType::CARD: {
@@ -525,6 +537,7 @@ void search::Action::execute(BattleContext &bc) const {
 
     bc.inputState = InputState::EXECUTING_ACTIONS;
     bc.executeActions();
+    return {beforeRng != rngState(), beforeHidden != bc.hiddenInformationAccesses};
 }
 
 template <typename ForwardIt>

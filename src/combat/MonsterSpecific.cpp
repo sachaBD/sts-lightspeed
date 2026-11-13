@@ -333,6 +333,7 @@ void Monster::preBattleAction(BattleContext &bc) {
 }
 
 void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that do not appear in the Colosseum event, adding rollMove to bot is unnecessary, because if they die before rollMove would have been triggered, it can't affect the next fight
+    bc.noteEnemyIntentAccess();
     const int asc = bc.ascension;
 
     const bool asc2 = bc.ascension >= 2;

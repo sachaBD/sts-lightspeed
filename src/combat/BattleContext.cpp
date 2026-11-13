@@ -1291,6 +1291,7 @@ void BattleContext::useAttackCard() {
             break;
 
         case CardId::FEAR_NO_EVIL:
+            noteEnemyIntentAccess();
             addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 11 : 8)));
             if (monsters.arr[t].isAttacking()) addToBot(Actions::ChangeStance(Stance::CALM));
             break;
@@ -1396,6 +1397,7 @@ void BattleContext::useAttackCard() {
             break;
 
         case CardId::GO_FOR_THE_EYES:
+            noteEnemyIntentAccess();
             addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 4 : 3)));
             if (monsters.arr[t].isAttacking()) {
                 addToBot(Actions::DebuffEnemy<MS::WEAK>(t, 1, false));
@@ -3704,6 +3706,15 @@ void BattleContext::drinkPotion(int idx, int target) {
 
 }
 
+void BattleContext::noteDrawPileOrderAccess() {
+    // Known top cards and previously scried cards may be conservatively counted as hidden.
+    if (!player.hasRelic<R::FROZEN_EYE>()) ++hiddenInformationAccesses;
+}
+
+void BattleContext::noteEnemyIntentAccess() {
+    if (player.hasRelic<R::RUNIC_DOME>()) ++hiddenInformationAccesses;
+}
+
 void BattleContext::drawCards(int count) {
     if (count <= 0 ||
         player.hasStatus<PS::NO_DRAW>() ||
@@ -3789,6 +3800,7 @@ void BattleContext::playTopCardInDrawPile(int monsterTargetIdx, bool exhausts) {
         return;
     }
 
+    noteDrawPileOrderAccess();
     CardQueueItem item(cards.popFromDrawPile(), monsterTargetIdx, player.energy);
     item.exhaustOnUse = exhausts;
     item.autoplay = true;
