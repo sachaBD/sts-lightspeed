@@ -66,6 +66,9 @@ namespace sts {
         int loopCount = 0;
         int energyWasted = 0;
         int cardsDrawn = 0;
+        // Diagnostic only, excluded from combat observations. Deltas scope reporting to an execution,
+        // without leaking earlier accesses through copied states or calls outside Action::execute.
+        std::uint64_t hiddenInformationAccesses = 0;
         // end for debugging purposes
 
         Random aiRng;
@@ -179,6 +182,8 @@ namespace sts {
         void discardPotion(int idx);
         void drinkPotion(int idx, int target=0);
 
+        void noteDrawPileOrderAccess();
+        void noteEnemyIntentAccess();
         void drawCards(int count);
         void discardAtEndOfTurn();
         void discardAtEndOfTurnHelper();

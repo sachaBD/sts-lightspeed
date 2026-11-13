@@ -31,6 +31,13 @@ namespace sts::search {
         CHOOSE_ENEMY,
     };
 
+    struct TransitionEffects {
+        bool consumedRng = false;
+        bool accessedHiddenInformation = false;
+
+        bool isChance() const { return consumedRng || accessedHiddenInformation; }
+    };
+
     // couldn't make a union work in only 32 bits
     struct Action {
 //        ActionType actionType;
@@ -56,7 +63,9 @@ namespace sts::search {
 
         [[nodiscard]] bool isValidAction(const sts::BattleContext &bc) const;
         std::ostream& printDesc(std::ostream &os, const sts::BattleContext &bc) const;
-        void execute(BattleContext &bc) const;
+        // Covers the chosen action and all queued effects through the next input or terminal state.
+        // Conservative: RNG use counts even when it cannot change the observed outcome.
+        TransitionEffects execute(BattleContext &bc) const;
 
 
         static std::vector<Action> enumerateCardSelectActions(const BattleContext &bc);

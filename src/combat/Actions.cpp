@@ -1397,6 +1397,7 @@ Action Actions::SwordBoomerangAction(int baseDamage) { // pretty hacky until I c
 
 Action Actions::SpotWeaknessAction(int target, int strength) {
     return {[=](BattleContext &bc) {
+        bc.noteEnemyIntentAccess();
         if (bc.monsters.arr[target].isAttacking()) {
             bc.player.buff<PS::STRENGTH>(strength);
         }
@@ -1407,6 +1408,7 @@ Action Actions::ScryAction(int count) {
     return {[=] (BattleContext &bc) {
         const int visible = std::min(count, static_cast<int>(bc.cards.drawPile.size()));
         if (visible == 0) return;
+        bc.noteDrawPileOrderAccess();
         bc.cardSelectInfo.cardSelectTask = CardSelectTask::SCRY;
         bc.cardSelectInfo.pickCount = visible;
         bc.inputState = InputState::CARD_SELECT;
@@ -1447,6 +1449,7 @@ Action Actions::CalculatedGambleAction() {
 Action Actions::EscapePlanAction(int block) {
     return {[=] (BattleContext &bc) {
         if (!bc.cards.drawPile.empty()) {
+            bc.noteDrawPileOrderAccess();
             const auto &card = bc.cards.drawPile.back();
             if (card.getType() == CardType::ATTACK) {
                 bc.addToBot(Actions::GainBlock(bc.calculateCardBlock(block)));
