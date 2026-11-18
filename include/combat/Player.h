@@ -109,6 +109,25 @@ namespace sts {
         int8_t machineLearning = 0;
         int8_t storm = 0;
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.cc); visit(s.gold); visit(s.curHp); visit(s.maxHp); visit(s.energy); visit(s.energyPerTurn);
+            visit(s.cardDrawPerTurn); visit(s.stance); visit(s.orbSlots); visit(s.orbs); visit(s.orbData);
+            visit(s.lightningOrbsChanneled); visit(s.frostOrbsChanneled); visit(s.lastTargetedMonster);
+            visit(s.block); visit(s.artifact); visit(s.dexterity); visit(s.focus); visit(s.strength);
+            visit(s.justAppliedBits); visit(s.statusBits0); visit(s.statusBits1); visit(s.statusMap);
+            visit(s.relicBits0); visit(s.relicBits1);
+            visit(s.happyFlowerCounter); visit(s.incenseBurnerCounter); visit(s.inkBottleCounter);
+            visit(s.inserterCounter); visit(s.nunchakuCounter); visit(s.penNibCounter); visit(s.sundialCounter);
+            visit(s.haveUsedNecronomiconThisTurn); visit(s.combustHpLoss); visit(s.devaFormEnergyPerTurn);
+            visit(s.echoFormCardsDoubled); visit(s.panacheCounter); visit(s.cardsPlayedThisTurn);
+            visit(s.attacksPlayedThisTurn); visit(s.skillsPlayedThisTurn); visit(s.orangePelletsCardTypesPlayed);
+            visit(s.cardsDiscardedThisTurn); visit(s.lastAttackUnblockedDamage); visit(s.timesDamagedThisCombat);
+            visit(s.bomb1); visit(s.bomb2); visit(s.bomb3); visit(s.selfRepairHeal); visit(s.creativeAi);
+            visit(s.helloWorld); visit(s.heatsinks); visit(s.nirvanaBlock); visit(s.rushdownDraw);
+            visit(s.studyInsights); visit(s.mentalFortressBlock); visit(s.machineLearning); visit(s.storm);
+        }
+
         template <RelicId r> void setHasRelic(bool value);
         template <PlayerStatus> void setHasStatus(bool value);
         template <PlayerStatus> void setStatusValueNoChecks(int value);

@@ -30,6 +30,13 @@ namespace sts {
         bool purgeOnUse = false;
         bool exhaustOnUse = false;
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.card); visit(s.target); visit(s.isEndTurn); visit(s.triggerOnUse); visit(s.ignoreEnergyTotal);
+            visit(s.energyOnUse); visit(s.freeToPlay); visit(s.randomTarget); visit(s.autoplay);
+            visit(s.regretCardCount); visit(s.purgeOnUse); visit(s.exhaustOnUse);
+        }
+
         CardQueueItem() = default;
         CardQueueItem(const CardInstance &card, int target, int energyOnUse) : card(card), target(target), energyOnUse(energyOnUse) {}
 
@@ -46,6 +53,14 @@ namespace sts {
         int backIdx = 0;
         int frontIdx = 0;
         std::array<CardQueueItem, capacity> arr;
+
+        // Only the queued items: the slots outside the ring keep whatever was popped from them.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.size); visit(s.backIdx); visit(s.frontIdx);
+            for (int i = 0; i < s.size; ++i) {
+                visit(s.arr.at((s.frontIdx + i) % capacity));
+            }
+        }
 
         void clear();
         void pushFront(CardQueueItem item);

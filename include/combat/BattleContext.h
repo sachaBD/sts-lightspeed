@@ -115,6 +115,22 @@ namespace sts {
 
         std::bitset<32> miscBits; // 0 stolen gold check,
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h. The action queue
+        // is left out: it holds code (std::function), not data.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.haveUsedDiscoveryAction); visit(s.undefinedBehaviorEvoked); visit(s.seed); visit(s.floorNum);
+            visit(s.encounter); visit(s.loopCount); visit(s.energyWasted); visit(s.cardsDrawn);
+            visit(s.hiddenInformationAccesses);
+            visit(s.aiRng); visit(s.cardRandomRng); visit(s.miscRng); visit(s.monsterHpRng); visit(s.potionRng);
+            visit(s.shuffleRng);
+            visit(s.ascension); visit(s.outcome); visit(s.unsupportedEffectKind); visit(s.unsupportedEffectId);
+            visit(s.inputState); visit(s.cardSelectInfo); visit(s.monsterTurnIdx); visit(s.isBattleOver);
+            visit(s.escapedCombat); visit(s.endTurnQueued); visit(s.endTurnAfterCurrentCard); visit(s.turnHasEnded);
+            visit(s.skipMonsterTurn); visit(s.cardQueue); visit(s.nightmareCards); visit(s.nightmareCopyCounts);
+            visit(s.potionCount); visit(s.potionCapacity); visit(s.potions); visit(s.turn); visit(s.player);
+            visit(s.monsters); visit(s.cards); visit(s.curCardQueueItem); visit(s.miscBits);
+        }
+
         BattleContext() = default;
         BattleContext(const BattleContext &rhs) = default;
 

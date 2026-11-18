@@ -47,6 +47,18 @@ namespace sts {
         int drawPileBloodCardCount = 0;
         int discardPileBloodCardCount = 0;
 
+        // Only the cards in hand: the slots past cardsInHand keep whatever was moved out of them. Limbo is left
+        // out: it holds retained cards only while a queued action (code, not data) restores them.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.nextUniqueCardId); visit(s.cardsInHand);
+            for (int i = 0; i < s.cardsInHand; ++i) {
+                visit(s.hand.at(i));
+            }
+            visit(s.stasisCards); visit(s.drawPile); visit(s.discardPile); visit(s.exhaustPile);
+            visit(s.handNormalityCount); visit(s.handPainCount); visit(s.strikeCount); visit(s.handBloodCardCount);
+            visit(s.drawPileBloodCardCount); visit(s.discardPileBloodCardCount);
+        }
+
         void init(const GameContext &gc, BattleContext &bc); // returns count of innate cards
 
         void createDeckCardInstanceInDrawPile(const Card &card, int deckIdx, int drawIdx);

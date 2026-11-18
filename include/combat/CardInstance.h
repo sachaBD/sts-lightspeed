@@ -35,6 +35,12 @@ namespace sts {
         bool freeToPlayOnce = false;
         bool retain = false;
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.id); visit(s.uniqueId); visit(s.specialData); visit(s.cost); visit(s.costForTurn);
+            visit(s.upgraded); visit(s.freeToPlayOnce); visit(s.retain);
+        }
+
         CardInstance() = default;
         CardInstance(CardId id, bool upgraded=false);
         CardInstance(const Card &card);

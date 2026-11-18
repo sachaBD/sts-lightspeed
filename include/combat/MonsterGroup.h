@@ -23,6 +23,15 @@ namespace sts {
         std::bitset<5> extraRollMoveOnTurn;
         std::bitset<5> skipTurn;
 
+        // Only the monsters in the fight: the slots past monsterCount are never used.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.monstersAlive); visit(s.monsterCount);
+            for (int i = 0; i < s.monsterCount; ++i) {
+                visit(s.arr.at(i));
+            }
+            visit(s.extraRollMoveOnTurn); visit(s.skipTurn);
+        }
+
         [[nodiscard]] bool areMonstersBasicallyDead() const;
         [[nodiscard]] int getAliveCount() const;
         [[nodiscard]] int getTargetableCount() const; // calculated here, not fast
