@@ -76,6 +76,12 @@ namespace sts {
 
         CardSelectTask cardSelectTask = CardSelectTask::INVALID;
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.cards); visit(s.canPickZero); visit(s.canPickAnyNumber); visit(s.pickCount); visit(s.data0);
+            visit(s.cardSelectTask);
+        }
+
         std::array<CardId, 3>& discovery_Cards() { return cards; }
         int& discovery_CopyCount() { return data0; }
         int& dualWield_CopyCount() { return data0; }

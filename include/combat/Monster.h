@@ -82,6 +82,16 @@ namespace sts {
         // awakened one isPhase2
         int miscInfo = 0;
 
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
+        template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
+            visit(s.idx); visit(s.id); visit(s.curHp); visit(s.maxHp); visit(s.block); visit(s.isEscapingB);
+            visit(s.halfDead); visit(s.escapeNext); visit(s.moveHistory); visit(s.statusBits); visit(s.artifact);
+            visit(s.blockReturn); visit(s.choked); visit(s.corpseExplosion); visit(s.lockOn); visit(s.mark);
+            visit(s.metallicize); visit(s.platedArmor); visit(s.poison); visit(s.regen); visit(s.shackled);
+            visit(s.strength); visit(s.vulnerable); visit(s.weak); visit(s.uniquePower0); visit(s.uniquePower1);
+            visit(s.miscInfo);
+        }
+
         Monster() = default;
         Monster(const Monster& rhs) = default;
 
