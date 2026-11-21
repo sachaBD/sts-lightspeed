@@ -15,6 +15,8 @@
 #include <map>
 #include <type_traits>
 #include <vector>
+#include <variant>
+#include <stdexcept>
 
 #include "data_structure/fixed_list.h"
 #include "game/Random.h"
@@ -35,6 +37,19 @@ namespace sts {
         template <class T> struct IsBitset : std::false_type {};
         template <std::size_t N> struct IsBitset<std::bitset<N>> : std::true_type {};
 
+        template <class T> struct IsVariant : std::false_type {};
+        template <class... T> struct IsVariant<std::variant<T...>> : std::true_type {};
+
+        template <std::size_t I = 0, class Variant>
+        void selectVariant(Variant& value, std::size_t index) {
+            if constexpr (I < std::variant_size_v<Variant>) {
+                if (index == I) value.template emplace<I>();
+                else selectVariant<I + 1>(value, index);
+            } else {
+                throw std::invalid_argument{"invalid state variant"};
+            }
+        }
+
         template <class T> struct IsArray : std::is_array<T> {};
         template <class T, std::size_t N> struct IsArray<std::array<T, N>> : std::true_type {};
     }
@@ -47,6 +62,11 @@ namespace sts {
 
         if constexpr (std::is_arithmetic_v<U> || std::is_enum_v<U> || std::is_same_v<U, Random>) {
             leaf(value);
+        } else if constexpr (state_fields::IsVariant<U>::value) {
+            std::uint64_t index = value.index();
+            leaf(index);
+            if constexpr (filling) state_fields::selectVariant(value, index);
+            std::visit(walk, value);
         } else if constexpr (state_fields::IsBitset<U>::value) {
             std::uint64_t bits = value.to_ullong();
             leaf(bits);

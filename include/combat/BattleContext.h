@@ -115,8 +115,7 @@ namespace sts {
 
         std::bitset<32> miscBits; // 0 stolen gold check,
 
-        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h. The action queue
-        // is left out: it holds code (std::function), not data.
+        // Every field, in a fixed order, for code that stores states: see combat/StateFields.h.
         template <class Self, class Visit> static void visitFields(Self &s, Visit &&visit) {
             visit(s.haveUsedDiscoveryAction); visit(s.undefinedBehaviorEvoked); visit(s.seed); visit(s.floorNum);
             visit(s.encounter); visit(s.loopCount); visit(s.energyWasted); visit(s.cardsDrawn);
@@ -126,7 +125,7 @@ namespace sts {
             visit(s.ascension); visit(s.outcome); visit(s.unsupportedEffectKind); visit(s.unsupportedEffectId);
             visit(s.inputState); visit(s.cardSelectInfo); visit(s.monsterTurnIdx); visit(s.isBattleOver);
             visit(s.escapedCombat); visit(s.endTurnQueued); visit(s.endTurnAfterCurrentCard); visit(s.turnHasEnded);
-            visit(s.skipMonsterTurn); visit(s.cardQueue); visit(s.nightmareCards); visit(s.nightmareCopyCounts);
+            visit(s.skipMonsterTurn); visit(s.actionQueue); visit(s.cardQueue); visit(s.nightmareCards); visit(s.nightmareCopyCounts);
             visit(s.potionCount); visit(s.potionCapacity); visit(s.potions); visit(s.turn); visit(s.player);
             visit(s.monsters); visit(s.cards); visit(s.curCardQueueItem); visit(s.miscBits);
         }
@@ -262,66 +261,6 @@ namespace sts {
     };
 
     std::ostream& operator<<(std::ostream &os, const BattleContext &bc);
-
-    template <PlayerStatus s>
-    Action Actions::BuffPlayer(int amount) {
-        return {[=] (BattleContext &bc) {
-            if (s == PlayerStatus::CORRUPTION && !bc.player.hasStatus<PS::CORRUPTION>()) {
-                bc.cards.onBuffCorruption();
-            }
-            bc.player.buff<s>(amount);
-        }};
-    }
-
-    template <PlayerStatus s>
-    Action Actions::DebuffPlayer(int amount, bool isSourceMonster) {
-        return {[=] (BattleContext &bc) {
-            bc.player.debuff<s>(amount, isSourceMonster);
-        }};
-    }
-
-    template<PlayerStatus s>
-    Action Actions::DecrementStatus(int amount) {
-        return {[=] (BattleContext &bc) {
-            bc.player.decrementStatus<s>(amount);
-        }};
-    }
-
-    template <PlayerStatus s>
-    Action Actions::RemoveStatus() {
-        return {[=] (BattleContext &bc) {
-            bc.player.setHasStatus<s>(false);
-        }};
-    }
-
-    template<MonsterStatus s>
-    Action Actions::BuffEnemy(int idx, int amount) {
-        return {[=] (BattleContext &bc) {
-            // todo check if alive?
-            bc.monsters.arr[idx].buff<s>(amount);
-        }};
-    }
-
-    template <MonsterStatus s>
-    Action Actions::DebuffEnemy(int idx, int amount, bool isSourceMonster) {
-        return {[=] (BattleContext &bc) {
-            bc.debuffEnemy<s>(idx, amount, isSourceMonster);
-        }};
-    }
-
-    template <MonsterStatus s>
-    Action Actions::DebuffAllEnemy(int amount, bool isSourceMonster) {
-        // todo this should just add all to bot immediately, not be called first
-        // ^^ never mind i think adding to top is a workaround here
-
-        return {[=] (BattleContext &bc) {
-            for (int i = bc.monsters.monsterCount-1; i >= 0; --i) {
-                if (bc.monsters.arr[i].isTargetable()) {
-                    bc.addToTop(Actions::DebuffEnemy<s>(i, amount, isSourceMonster));
-                }
-            }
-        }};
-    }
 
     template <MonsterStatus s>
     void BattleContext::debuffEnemy(int idx, int amount, bool isSourceMonster) {

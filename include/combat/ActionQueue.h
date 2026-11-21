@@ -6,26 +6,12 @@
 #define STS_ML_ACTIONQUEUE_H
 
 #include "sts_common.h"
-
+#include "combat/QueuedAction.h"
 #include <bitset>
-#include <functional>
 #include <cassert>
 
 
 namespace sts {
-
-    struct BattleContext;
-    typedef std::function<void (BattleContext &)> ActionFunction;
-
-    struct Action {
-        ActionFunction actFunc;
-        bool clearOnCombatVictory = true;
-
-        Action() = default;
-        Action(ActionFunction a) : actFunc(std::move(a)) {}
-        Action(ActionFunction a, bool b) : actFunc(std::move(a)), clearOnCombatVictory(b) {}
-    };
-
 
     // Simple deque
     template<int capacity>
@@ -36,34 +22,25 @@ namespace sts {
         int size = 0;
         std::bitset<capacity> bits; // for the shouldClear field
 
-#ifdef sts_action_queue_use_raw_array
-        ActionFunction arr[capacity];
-        ActionQueue() = default;
-        ActionQueue(const ActionQueue &rhs) : size(rhs.size), back(rhs.back), front(rhs.front), bits(rhs.bits) {
-            int cur = rhs.front;
-            for (int i = 0; i < rhs.size; ++i) {
-                if (cur >= capacity) {
-                    cur = 0;
-                }
-                arr[cur] = rhs.arr[cur];
-            }
+        std::array<ActionPayload, capacity> arr;
+
+        template <class Self, class Visit> static void visitFields(Self& s, Visit&& visit) {
+            visit(s.front); visit(s.back); visit(s.size); visit(s.bits);
+            for (int i = 0; i < s.size; ++i) visit(s.arr.at((s.front + i) % capacity));
         }
-#else
-        std::array<ActionFunction,capacity> arr;
-#endif
 
         void clear();
         void pushFront(Action a);
         void pushBack(Action a);
         bool isEmpty();
-        ActionFunction popFront();
+        Action popFront();
         [[nodiscard]] int getCapacity() const;
     };
 
     template<int capacity>
     void ActionQueue<capacity>::clear() {
-        // Drop the stored functions too: stale slots would otherwise be copied with every BattleContext.
-        for (auto &f : arr) f = nullptr;
+        // Release payloads in inactive slots as well.
+        for (auto &effect : arr) effect = queued::NoOp{};
         size = 0;
         back = 0;
         front = 0;
@@ -80,7 +57,7 @@ namespace sts {
             front = capacity-1;
         }
         bits.set(front, a.clearOnCombatVictory);
-        arr[front] = std::move(a.actFunc);
+        arr[front] = std::move(a.payload);
     }
 
     template<int capacity>
@@ -94,7 +71,7 @@ namespace sts {
             back = 0;
         }
         bits.set(back, a.clearOnCombatVictory);
-        arr[back] = std::move(a.actFunc);
+        arr[back] = std::move(a.payload);
         ++back;
         ++size;
     }
@@ -105,13 +82,13 @@ namespace sts {
     }
 
     template<int capacity>
-    ActionFunction ActionQueue<capacity>::popFront() {
+    Action ActionQueue<capacity>::popFront() {
 #ifdef sts_asserts
         assert(size > 0 );
 #endif
-        // Move out and empty the slot (a stale slot would be copied with every BattleContext copy).
-        ActionFunction a = std::move(arr[front]);
-        arr[front] = nullptr;
+        // Inactive slots must not retain captured cards or vectors.
+        Action a{std::move(arr[front]), bits[front]};
+        arr[front] = queued::NoOp{};
         ++front;
         --size;
         if (front >= capacity) {
