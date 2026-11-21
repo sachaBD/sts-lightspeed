@@ -6,7 +6,6 @@
 #define STS_ML_ACTIONS_H
 
 #include <utility>
-#include <functional>
 #include <cstdint>
 
 #include "constants/PlayerStatusEffects.h"
@@ -25,7 +24,6 @@ namespace sts {
     struct CardInstance;
     struct CardQueueItem;
 
-    typedef std::array<std::uint16_t,5> DamageMatrix;
 
     struct Actions {
         static Action SetState(InputState state);
@@ -44,6 +42,8 @@ namespace sts {
 
         // todo, action and damage actions should clear certain actions from the queue if the player kills all enemies
         static Action AttackEnemy(int idx, int damage);
+        static Action Judgment(int target, int threshold);
+        static Action Catalyst(int target, int multiplier);
 
         // for cards that do one hit, like cleave
         static Action AttackAllEnemy(int baseDamage);
@@ -196,6 +196,41 @@ namespace sts {
 
         static Action AttackAllMonsterRecursive(DamageMatrix matrix, int timesRemaining);
     };
+
+    template <PlayerStatus s>
+    Action Actions::BuffPlayer(int amount) {
+        return {queued::BuffPlayer{s, amount}};
+    }
+
+    template <PlayerStatus s>
+    Action Actions::DebuffPlayer(int amount, bool isSourceMonster) {
+        return {queued::DebuffPlayer{s, amount, isSourceMonster}};
+    }
+
+    template <PlayerStatus s>
+    Action Actions::DecrementStatus(int amount) {
+        return {queued::DecrementStatus{s, amount}};
+    }
+
+    template <PlayerStatus s>
+    Action Actions::RemoveStatus() {
+        return {queued::RemoveStatus{s}};
+    }
+
+    template <MonsterStatus s>
+    Action Actions::BuffEnemy(int idx, int amount) {
+        return {queued::BuffEnemy{s, idx, amount}};
+    }
+
+    template <MonsterStatus s>
+    Action Actions::DebuffEnemy(int idx, int amount, bool isSourceMonster) {
+        return {queued::DebuffEnemy{s, idx, amount, isSourceMonster}};
+    }
+
+    template <MonsterStatus s>
+    Action Actions::DebuffAllEnemy(int amount, bool isSourceMonster) {
+        return {queued::DebuffAllEnemy{s, amount, isSourceMonster}};
+    }
 
 }
 

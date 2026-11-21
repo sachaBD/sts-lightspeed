@@ -762,7 +762,7 @@ void BattleContext::executeActions() {
         if (!actionQueue.isEmpty()) {
             // do a action
             auto a = std::move(actionQueue.popFront());
-            a(*this);
+            a.execute(*this);
             continue;
         }
 
@@ -1791,14 +1791,7 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::JUDGMENT:
-            addToBot({[=](BattleContext &bc) {
-                auto &monster = bc.monsters.arr[t];
-                if (!monster.isDeadOrEscaped() && monster.curHp <= (up ? 40 : 30)) {
-                    monster.curHp = 0;
-                    monster.die(bc);
-                    bc.checkCombat();
-                }
-            }});
+            addToBot(Actions::Judgment(t, up ? 40 : 30));
             break;
 
         case CardId::CARVE_REALITY:
@@ -2093,12 +2086,7 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::CATALYST:
-            addToBot({[=](BattleContext &bc) {
-                auto &monster = bc.monsters.arr[t];
-                if (!monster.isDeadOrEscaped() && monster.hasStatus<MS::POISON>()) {
-                    monster.setStatus<MS::POISON>(monster.getStatus<MS::POISON>() * (up ? 3 : 2));
-                }
-            }});
+            addToBot(Actions::Catalyst(t, up ? 3 : 2));
             break;
 
         case CardId::CORPSE_EXPLOSION:
