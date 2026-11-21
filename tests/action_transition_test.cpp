@@ -81,25 +81,10 @@ void visibleAndBlockedDraws() {
     auto full = fixture(CardId::STRIKE_RED);
     while (full.cards.cardsInHand < CardManager::MAX_HAND_SIZE)
         full.cards.createTempCardInHand(CardInstance{CardId::DEFEND_RED});
-    full.addToBot(Actions::DrawCards(1));
+    const auto blockedDraws = full.cardsDrawn;
+    Actions::DrawCards(full, 1);
+    require(full.cardsDrawn == blockedDraws, "a full hand must block direct draws");
     require(!play(full).isChance(), "hand-limit-blocked queued draw must be deterministic");
-}
-
-void allRngStreamsAndLowLevelCalls() {
-    const std::array<Random BattleContext::*, 6> streams{
-        &BattleContext::aiRng, &BattleContext::cardRandomRng, &BattleContext::miscRng,
-        &BattleContext::monsterHpRng, &BattleContext::potionRng, &BattleContext::shuffleRng};
-    for (auto stream : streams) {
-        for (bool lowLevel : {false, true}) {
-            auto state = fixture(CardId::STRIKE_RED);
-            const search::TransitionSnapshot before{state};
-            if (lowLevel) (state.*stream).nextLong();
-            else (state.*stream).random(0);  // Only one possible result still consumes RNG.
-            const auto effects = before.effects(state);
-            require(effects.consumedRng && !effects.accessedHiddenInformation && effects.isChance(),
-                    "all RNG streams and low-level calls must be detected");
-        }
-    }
 }
 
 void shuffleAndRandomEffects() {
@@ -121,31 +106,34 @@ void shuffleAndRandomEffects() {
     require(!actions.front().execute(generated).isChance(), "choosing a public offer must not inherit RNG use");
 }
 
-void scryAndTopCardEffects() {
+void directRevelations() {
     for (bool frozenEye : {false, true}) {
         auto scry = fixture(CardId::STRIKE_RED);
         scry.player.setHasRelic<RelicId::FROZEN_EYE>(frozenEye);
-        scry.addToBot(Actions::ScryAction(1));
-        const auto effects = play(scry);
-        require(!effects.consumedRng && effects.accessedHiddenInformation == !frozenEye,
-                "Scry must report revealing hidden order, unless Frozen Eye exposes it");
-        require(scry.inputState == InputState::CARD_SELECT, "Scry must pause at its public menu");
+        const auto before = scry.hiddenInformationAccesses;
+        Actions::ScryAction(scry, 1);
+        require(scry.hiddenInformationAccesses - before == unsigned(!frozenEye),
+                "Scry must report hidden order unless Frozen Eye exposes it");
         require(!Action{ActionType::MULTI_CARD_SELECT, 1}.execute(scry).isChance(),
-                "discarding a publicly offered Scry card must be deterministic");
+                "choosing publicly scried cards must be deterministic");
 
         auto autoplay = fixture(CardId::STRIKE_RED);
-        autoplay.addToBot(Actions::PlayTopCard(0, true));
         autoplay.player.setHasRelic<RelicId::FROZEN_EYE>(frozenEye);
-        const auto top = play(autoplay);
-        require(!top.consumedRng && top.accessedHiddenInformation == !frozenEye,
-                "top-card autoplay must report hidden-order dependence without RNG");
+        const auto hidden = autoplay.hiddenInformationAccesses;
+        Actions::PlayTopCard(autoplay, 0, true);
+        require(autoplay.hiddenInformationAccesses - hidden == unsigned(!frozenEye),
+                "autoplay must report hidden top-card dependence");
+        autoplay.inputState = InputState::EXECUTING_ACTIONS;
+        autoplay.executeActions();
+        require(autoplay.resolution.empty(), "direct autoplay must finish its card frame");
     }
-
-    auto peek = fixture(CardId::ESCAPE_PLAN);
-    peek.player.debuff<PS::NO_DRAW>(1);
-    const auto effects = play(peek);
-    require(effects.accessedHiddenInformation && !effects.consumedRng,
-            "top-card inspection must count even when the subsequent draw is blocked");
+    auto empty = fixture(CardId::STRIKE_RED);
+    empty.cards.drawPile.clear();
+    const auto before = empty.hiddenInformationAccesses;
+    Actions::ScryAction(empty, 1);
+    Actions::PlayTopCard(empty, 0, true);
+    require(empty.hiddenInformationAccesses == before && empty.resolution.empty(),
+            "empty-pile operations must neither reveal nor schedule a card");
 }
 
 void hiddenIntents() {
@@ -174,18 +162,6 @@ void copiesAndEarlierAccessesDoNotLeak() {
             "prior hidden accesses must not leak through original or copied states");
 }
 
-void emptyPileEffects() {
-    auto scry = fixture(CardId::STRIKE_RED);
-    scry.cards.drawPile.clear();
-    scry.addToBot(Actions::ScryAction(1));
-    require(!play(scry).isChance(), "Scry over an empty pile reveals nothing");
-
-    auto autoplay = fixture(CardId::STRIKE_RED);
-    autoplay.cards.drawPile.clear();
-    autoplay.addToBot(Actions::PlayTopCard(0, true));
-    require(!play(autoplay).isChance(), "autoplay with no draw or discard cards accesses no hidden card");
-}
-
 void endTurnAndTerminal() {
     auto state = fixture(CardId::STRIKE_RED);
     require(Action{ActionType::END_TURN}.execute(state).isChance(),
@@ -205,12 +181,10 @@ int main() {
         deterministicAcrossWorlds();
         hiddenDrawWithoutRng();
         visibleAndBlockedDraws();
-        allRngStreamsAndLowLevelCalls();
         shuffleAndRandomEffects();
-        scryAndTopCardEffects();
+        directRevelations();
         hiddenIntents();
         copiesAndEarlierAccessesDoNotLeak();
-        emptyPileEffects();
         endTurnAndTerminal();
         std::cout << "Action transition invariants passed\n";
         return 0;

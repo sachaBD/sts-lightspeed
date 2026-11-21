@@ -28,7 +28,6 @@ namespace sts {
 
         int cardsInHand = 0;
         std::array<CardInstance, MAX_HAND_SIZE> hand;
-        std::array<CardInstance, MAX_HAND_SIZE> limbo; // used only for end of turn during discard, for retained cards
         std::array<CardInstance,2> stasisCards { CardId::INVALID, CardId::INVALID }; // for bronze automaton fight
 
 #ifdef sts_card_manager_use_fixed_list
@@ -53,7 +52,7 @@ namespace sts {
             for (int i = 0; i < s.cardsInHand; ++i) {
                 visit(s.hand.at(i));
             }
-            visit(s.limbo); visit(s.stasisCards); visit(s.drawPile); visit(s.discardPile); visit(s.exhaustPile);
+            visit(s.stasisCards); visit(s.drawPile); visit(s.discardPile); visit(s.exhaustPile);
             visit(s.handNormalityCount); visit(s.handPainCount); visit(s.strikeCount); visit(s.handBloodCardCount);
             visit(s.drawPileBloodCardCount); visit(s.discardPileBloodCardCount);
         }

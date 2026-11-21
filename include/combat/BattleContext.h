@@ -17,8 +17,8 @@
 #include "combat/Player.h"
 #include "combat/Monster.h"
 #include "combat/MonsterGroup.h"
-#include "combat/ActionQueue.h"
-#include "combat/CardQueue.h"
+#include "combat/Resolution.h"
+#include "combat/CardPlay.h"
 #include "combat/Actions.h"
 #include "combat/CardManager.h"
 #include "combat/CardSelectInfo.h"
@@ -89,13 +89,12 @@ namespace sts {
 
         bool isBattleOver = false;
         bool escapedCombat = false;
-        bool endTurnQueued = false;
+        bool endTurnRequested = false;
         bool endTurnAfterCurrentCard = false;
         bool turnHasEnded = false;
         bool skipMonsterTurn = false;
 
-        ActionQueue<50> actionQueue;
-        CardQueue cardQueue;
+        std::vector<ResolutionFrame> resolution;
 
         // Pending Nightmare copies, resolved at the start of the next player
         // turn after the agent has selected the source hand card.
@@ -111,7 +110,7 @@ namespace sts {
         MonsterGroup monsters;
         CardManager cards;
 
-        CardQueueItem curCardQueueItem;
+        CardPlay currentCard;
 
         std::bitset<32> miscBits; // 0 stolen gold check,
 
@@ -124,10 +123,10 @@ namespace sts {
             visit(s.shuffleRng);
             visit(s.ascension); visit(s.outcome); visit(s.unsupportedEffectKind); visit(s.unsupportedEffectId);
             visit(s.inputState); visit(s.cardSelectInfo); visit(s.monsterTurnIdx); visit(s.isBattleOver);
-            visit(s.escapedCombat); visit(s.endTurnQueued); visit(s.endTurnAfterCurrentCard); visit(s.turnHasEnded);
-            visit(s.skipMonsterTurn); visit(s.actionQueue); visit(s.cardQueue); visit(s.nightmareCards); visit(s.nightmareCopyCounts);
+            visit(s.escapedCombat); visit(s.endTurnRequested); visit(s.endTurnAfterCurrentCard); visit(s.turnHasEnded);
+            visit(s.skipMonsterTurn); visit(s.resolution); visit(s.nightmareCards); visit(s.nightmareCopyCounts);
             visit(s.potionCount); visit(s.potionCapacity); visit(s.potions); visit(s.turn); visit(s.player);
-            visit(s.monsters); visit(s.cards); visit(s.curCardQueueItem); visit(s.miscBits);
+            visit(s.monsters); visit(s.cards); visit(s.currentCard); visit(s.miscBits);
         }
 
         BattleContext() = default;
@@ -154,8 +153,10 @@ namespace sts {
 
         void executeActions();
 
-        void playCardQueueItem(CardQueueItem);
-        void useCard();
+        void beginCard(CardPlay);
+        bool prepareCard();
+        void drawAfterChoice(int);
+        void finishStartTurn();
         void useNoTriggerCard();
 
         void useAttackCard();
@@ -170,22 +171,16 @@ namespace sts {
         void onAfterUseCard();
 
         void setState(InputState state);
-        void addToTop(const Action &a);
-        void addToBot(const Action &a);
 
-        void addToTopCard(CardQueueItem item);
-        void addToBotCard(CardQueueItem item);
 
         void checkCombat();
-        void clearPostCombatActions();
-        void cleanCardQueue();
 
         [[nodiscard]] bool isCardPlayAllowed() const;
 
         // **********************
 
         void endTurn(); // called when player clicks the end turn button
-        void callEndOfTurnActions(); // GameActionManager.callEndTurnActions(), called when the end turn cardQueue item is reached.
+        void callEndOfTurnActions();
         void onTurnEnding(); // AbstractRoom endTurn(), called when the turn actually ends.
 
         void callEndTurnEarlySequence(); // time eater
@@ -201,13 +196,11 @@ namespace sts {
         void noteEnemyIntentAccess();
         void drawCards(int count);
         void discardAtEndOfTurn();
-        void discardAtEndOfTurnHelper();
 
         void playTopCardInDrawPile(int monsterTargetIdx, bool exhausts);
 
         void moveToHandHelper(CardInstance c);
         void exhaustSpecificCardInHand(int idx, std::int16_t uniqueId);
-        void restoreRetainedCards(int count);
         void exhaustTopCardInHand();
 
         // this is
@@ -221,7 +214,6 @@ namespace sts {
         [[nodiscard]] int calculateCardBlock(int baseBlock) const;
 
         void queuePurgeCard(const CardInstance &c, int target);
-        void addPurgeCardToCardQueue(const CardQueueItem &item); // not really the front but hey
         void noOpRollMove(); // called by monsters to manipulate the aiRng counter when their rollMove function doesn't do anything
 
         void onManualDiscard(const CardInstance &c);
@@ -262,6 +254,56 @@ namespace sts {
 
     std::ostream& operator<<(std::ostream &os, const BattleContext &bc);
 
+    template <PlayerStatus s>
+    void Actions::BuffPlayer(BattleContext& bc, int amount) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        if (s == PlayerStatus::CORRUPTION && !bc.player.hasStatus<PS::CORRUPTION>()) {
+            bc.cards.onBuffCorruption();
+        }
+        bc.player.buff<s>(amount);
+    }
+
+    template <PlayerStatus s>
+    void Actions::DebuffPlayer(BattleContext& bc, int amount, bool isSourceMonster) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        bc.player.debuff<s>(amount, isSourceMonster);
+    }
+
+    template<PlayerStatus s>
+    void Actions::DecrementStatus(BattleContext& bc, int amount) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        bc.player.decrementStatus<s>(amount);
+    }
+
+    template <PlayerStatus s>
+    void Actions::RemoveStatus(BattleContext& bc) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        bc.player.setHasStatus<s>(false);
+    }
+
+    template<MonsterStatus s>
+    void Actions::BuffEnemy(BattleContext& bc, int idx, int amount) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        // todo check if alive?
+        bc.monsters.arr[idx].buff<s>(amount);
+    }
+
+    template <MonsterStatus s>
+    void Actions::DebuffEnemy(BattleContext& bc, int idx, int amount, bool isSourceMonster) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        bc.debuffEnemy<s>(idx, amount, isSourceMonster);
+    }
+
+    template <MonsterStatus s>
+    void Actions::DebuffAllEnemy(BattleContext& bc, int amount, bool isSourceMonster) {
+        if (bc.outcome != Outcome::UNDECIDED) return;
+        for (int i = bc.monsters.monsterCount-1; i >= 0; --i) {
+            if (bc.monsters.arr[i].isTargetable()) {
+                Actions::DebuffEnemy<s>(bc, i, amount, isSourceMonster);
+            }
+        }
+    }
+
     template <MonsterStatus s>
     void BattleContext::debuffEnemy(int idx, int amount, bool isSourceMonster) {
         // todo poison and snake skull
@@ -274,11 +316,11 @@ namespace sts {
 
         e.addDebuff<s>(amount, isSourceMonster);
         if (player.hasStatus<PS::SADISTIC>()) {
-            addToBot( Actions::DamageEnemy(idx, player.getStatus<PS::SADISTIC>()) );
+            Actions::DamageEnemy(*this, idx, player.getStatus<PS::SADISTIC>());
         }
 
         if (s == MS::VULNERABLE && player.hasRelic<RelicId::CHAMPION_BELT>()) {
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(idx, 1, false) );
+            Actions::DebuffEnemy<MS::WEAK>(*this, idx, 1, false);
         }
     }
 

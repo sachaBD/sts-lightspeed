@@ -271,7 +271,7 @@ int main() {
                     && bc->cardSelectInfo.cardSelectTask == CardSelectTask::WARCRY) left_hand = bc->cards.hand[a.getSelectIdx()].uniqueId;
                 // the card being played while a choice is pending (in limbo; it may be reshuffled and drawn back)
                 const int limbo = a.getActionType() == search::ActionType::SINGLE_CARD_SELECT
-                    ? bc->curCardQueueItem.card.uniqueId : -1;
+                    ? bc->currentCard.card.uniqueId : -1;
                 a.execute(*bc);
                 resp = {{"state", state_json(*bc)}, {"actions", actions_json(*bc)}, {"ai_rolls", rolls_since(before, bc->aiRng)},
                         {"drawn", drawn_json(draw_b, disc_b, hand_b, a.getActionType() == search::ActionType::END_TURN, left_hand, limbo, *bc)}, {"exhausted", exhausted_json(hand_b, exh_b, *bc)}};

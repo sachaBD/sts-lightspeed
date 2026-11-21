@@ -64,7 +64,7 @@ void CardManager::init(const sts::GameContext &gc, BattleContext &bc) {
 
     int innateCount =  innateIdx - normalCount;
     if (innateCount  > bc.player.cardDrawPerTurn) {
-        bc.addToBot( Actions::DrawCards(innateCount-bc.player.cardDrawPerTurn) );
+        Actions::DrawCards(bc, innateCount-bc.player.cardDrawPerTurn);
     }
 }
 
@@ -419,10 +419,10 @@ void CardManager::draw(BattleContext &bc, int amount) {
 
         } else if (c.getType() == CardType::STATUS) {
             if (evolve) {
-                bc.addToBot( Actions::DrawCards(evolve) );
+                Actions::DrawCards(bc, evolve);
             }
             if (fireBreathing) {
-                bc.addToBot( Actions::DamageAllEnemy(fireBreathing) );
+                Actions::DamageAllEnemy(bc, fireBreathing);
             }
             if (c.getId() == CardId::VOID) {
                 // game adds action to bottom of the queue but I think it is ok to do directly
@@ -431,7 +431,7 @@ void CardManager::draw(BattleContext &bc, int amount) {
 
         } else if (c.getType() == CardType::CURSE) {
             if (fireBreathing) {
-                bc.addToBot( Actions::DamageAllEnemy(fireBreathing) );
+                Actions::DamageAllEnemy(bc, fireBreathing);
             }
 
         }

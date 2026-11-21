@@ -353,13 +353,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::ACID_SLIME_L_CORROSIVE_SPIT:
             attackPlayerHelper(bc, asc2 ? 12 : 11);
-            bc.addToBot(Actions::MakeTempCardInDiscard({CardId::SLIMED}, 2));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::MakeTempCardInDiscard(bc, {CardId::SLIMED}, 2);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::ACID_SLIME_L_LICK:
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(2, true));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::ACID_SLIME_L_SPLIT:
@@ -368,31 +368,31 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::ACID_SLIME_L_TACKLE:
             attackPlayerHelper(bc, asc2 ? 18 : 16);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::ACID_SLIME_M_CORROSIVE_SPIT:
             attackPlayerHelper(bc, asc2 ? 8 : 7);
-            bc.addToBot(Actions::MakeTempCardInDiscard(CardId::SLIMED));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::MakeTempCardInDiscard(bc, CardId::SLIMED);
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ ACID_SLIME_M ************
 
         case MMID::ACID_SLIME_M_LICK:
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(1, true));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 1, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::ACID_SLIME_M_TACKLE:
             attackPlayerHelper(bc, asc2 ? 12 : 10);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ ACID_SLIME_S ************
 
         case MMID::ACID_SLIME_S_LICK:
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(1, true));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 1, true);
             setMove(MMID::ACID_SLIME_S_TACKLE);
             break;
 
@@ -410,7 +410,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::BEAR_LUNGE:
             attackPlayerHelper(bc, asc2 ? 10 : 9);
-            bc.addToBot( Actions::MonsterGainBlock(idx, 9) );
+            Actions::MonsterGainBlock(bc, idx, 9);
             setMove(MMID::BEAR_MAUL);
             break;
 
@@ -425,7 +425,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::ROMEO_AGONIZING_SLASH:
             attackPlayerHelper(bc, asc2 ? 12 : 10);
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(asc17 ? 3 : 2, true) );
+            Actions::DebuffPlayer<PS::WEAK>(bc, asc17 ? 3 : 2, true);
             setMove(MMID::ROMEO_CROSS_SLASH);
             break;
 
@@ -443,26 +443,26 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         case MMID::BLUE_SLAVER_RAKE:
             // 4
             attackPlayerHelper(bc, asc2 ? 8 : 7);
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(asc17 ? 2 : 1, true));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::WEAK>(bc, asc17 ? 2 : 1, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BLUE_SLAVER_STAB:
             // 1
             attackPlayerHelper(bc, asc2 ? 13 : 12);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ BOOK OF STABBING ************
 
         case MMID::BOOK_OF_STABBING_MULTI_STAB:
             attackPlayerHelper(bc, asc3 ? 7 : 6, miscInfo);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BOOK_OF_STABBING_SINGLE_STAB:
             attackPlayerHelper(bc, asc3 ? 24 : 21);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
 
@@ -513,7 +513,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::BRONZE_ORB_BEAM:
             attackPlayerHelper(bc, 8);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BRONZE_ORB_STASIS:
@@ -532,12 +532,12 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::BYRD_CAW:
             buff<MS::STRENGTH>(1);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BYRD_FLY:
             buff<MS::FLIGHT>(asc17 ? 4 : 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BYRD_HEADBUTT:
@@ -547,7 +547,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::BYRD_PECK:
             attackPlayerHelper(bc, 1, asc2 ? 6 : 5);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::BYRD_STUNNED:
@@ -557,7 +557,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::BYRD_SWOOP:
             attackPlayerHelper(bc, asc2 ? 14 : 12);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CENTURION_DEFEND: {
@@ -571,18 +571,18 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::CENTURION_FURY:
             attackPlayerHelper(bc, asc2 ? 7 : 6, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CENTURION_SLASH:
             attackPlayerHelper(bc, asc2 ? 14 : 12);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::MYSTIC_ATTACK_DEBUFF: {
             attackPlayerHelper(bc, asc2 ? 9 : 8);
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -614,44 +614,44 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::CHOSEN_DEBILITATE: // 3
             attackPlayerHelper(bc, asc2 ? 12 : 10);
-            bc.addToBot(Actions::DebuffPlayer<PS::VULNERABLE>(2, true));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CHOSEN_DRAIN: // 2
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(3, true));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 3, true);
             buff<MS::STRENGTH>(3);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CHOSEN_HEX: // 4
-            bc.addToBot(Actions::DebuffPlayer<PS::HEX>(1));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::HEX>(bc, 1);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CHOSEN_POKE: // 5
             attackPlayerHelper(bc, asc2 ? 6 : 5, 2);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CHOSEN_ZAP: // 1
             attackPlayerHelper(bc, asc2 ? 21 : 18);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
             // ************ FAT GREMLIN ************
 
         case MMID::FAT_GREMLIN_SMASH: {
             attackPlayerHelper(bc, asc2 ? 5 : 4);
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(1, true));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 1, true);
             if (asc17) {
-                bc.addToBot(Actions::DebuffPlayer<PS::FRAIL>(1, true));
+                Actions::DebuffPlayer<PS::FRAIL>(bc, 1, true);
             }
 
             if (doesEscapeNext()) {
                 setMove(MMID::GENERIC_ESCAPE_MOVE);
             } else {
-                bc.addToBot(Actions::NoOpRollMove());
+                Actions::NoOpRollMove(bc);
             }
             break;
         }
@@ -661,7 +661,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             if (doesEscapeNext()) {
                 setMove(MMID::GENERIC_ESCAPE_MOVE);
             } else {
-                bc.addToBot(Actions::NoOpRollMove());
+                Actions::NoOpRollMove(bc);
             }
             break;
         }
@@ -676,7 +676,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::CULTIST_DARK_STRIKE:
             attackPlayerHelper(bc, 6);
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::CULTIST_INCANTATION: {
@@ -691,13 +691,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::FUNGI_BEAST_BITE:
             attackPlayerHelper(bc, 6);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::FUNGI_BEAST_GROW: {
             const int strengthBuff[] = {3, 4, 5};
             buff<MS::STRENGTH>(strengthBuff[hallwayIdx]);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -723,20 +723,20 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 }
             }
             buff<MS::STRENGTH>(strGain);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::GREMLIN_LEADER_RALLY: { // 2
             // summon two gremlins in open slots
-            bc.addToBot(Actions::SummonGremlins() );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::SummonGremlins(bc);
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::GREMLIN_LEADER_STAB: { // 4
             attackPlayerHelper(bc, 6, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -744,30 +744,30 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::GREEN_LOUSE_BITE:
             attackPlayerHelper(bc, miscInfo);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::GREEN_LOUSE_SPIT_WEB:
-            bc.addToBot(Actions::DebuffPlayer<PS::WEAK>(2)); // isSourceMonster true
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::WEAK>(bc, 2); // isSourceMonster true
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ GREMLIN NOB ************
 
         case MMID::GREMLIN_NOB_BELLOW:
             buff<MS::ENRAGE>(asc18 ? 3 : 2);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::GREMLIN_NOB_RUSH:
             attackPlayerHelper(bc, asc3 ? 16 : 14);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::GREMLIN_NOB_SKULL_BASH:
             attackPlayerHelper(bc, asc3 ? 8 : 6);
-            bc.addToBot(Actions::DebuffPlayer<PS::VULNERABLE>(2, true));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ GREMLIN WIZARD ************
@@ -802,14 +802,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             attackPlayerHelper(bc, miscInfo, 6);
             uniquePower0 = 0;
             setMove(MMID::HEXAGHOST_SEAR);
-            bc.addToBot( Actions::NoOpRollMove() );
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::HEXAGHOST_INFERNO: // 6
             attackPlayerHelper(bc, asc4 ? 3 : 2, 6);
             uniquePower0 = 0;
             setMove(MMID::HEXAGHOST_SEAR);
-            bc.addToBot( Actions::NoOpRollMove() );
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::HEXAGHOST_INFLAME: // 3
@@ -822,9 +822,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::HEXAGHOST_SEAR: // 4
             attackPlayerHelper(bc, 6);
-            bc.addToBot (
-                    Actions::MakeTempCardInDiscard(CardInstance(CardId::BURN, bc.turn > 8), asc19 ? 2 : 1)
-            );
+            Actions::MakeTempCardInDiscard(bc, CardInstance(CardId::BURN, bc.turn > 8), asc19 ? 2 : 1);
             if (uniquePower0 == 0) {
                 setMove(MMID::HEXAGHOST_TACKLE);
 
@@ -835,14 +833,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 setMove(MMID::HEXAGHOST_INFERNO);
             }
             ++uniquePower0;
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::HEXAGHOST_TACKLE: // 2
             attackPlayerHelper(bc, asc4 ? 6 : 5, 2);
             setMove(MMID::HEXAGHOST_SEAR);
             ++uniquePower0;
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
 
@@ -850,21 +848,21 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::JAW_WORM_CHOMP:
             attackPlayerHelper(bc, asc2 ? 12 : 11);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::JAW_WORM_BELLOW: {
             const int strengthBuff[] = {3,4,5};
             buff<MS::STRENGTH>(strengthBuff[hallwayIdx]);
-            bc.addToBot(Actions::MonsterGainBlock(idx, asc17 ? 9 : 6));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::MonsterGainBlock(bc, idx, asc17 ? 9 : 6);
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::JAW_WORM_THRASH:
             attackPlayerHelper(bc, 7);
-            bc.addToBot(Actions::MonsterGainBlock(idx, 5));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::MonsterGainBlock(bc, idx, 5);
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ LAGAVULIN ************
@@ -876,12 +874,12 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             } else {
                 setMove(MMID::LAGAVULIN_ATTACK);
             }
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::LAGAVULIN_SIPHON_SOUL:
-            Actions::DebuffPlayer<PS::DEXTERITY>(asc18 ? -2 : -1).execute(bc);
-            Actions::DebuffPlayer<PS::STRENGTH>(asc18 ? -2 : -1).execute(bc);
+            Actions::DebuffPlayer<PS::DEXTERITY>(bc, asc18 ? -2 : -1);
+            Actions::DebuffPlayer<PS::STRENGTH>(bc, asc18 ? -2 : -1);
             setMove(MMID::LAGAVULIN_ATTACK);
             bc.noOpRollMove();
             break;
@@ -990,14 +988,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::ORB_WALKER_CLAW: // 2
             attackPlayerHelper(bc, asc2 ? 16 : 15);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::ORB_WALKER_LASER: { // 1
             attackPlayerHelper(bc, asc2 ? 11 : 10);
-            bc.addToBot( Actions::ShuffleTempCardIntoDrawPile(CardId::BURN, 1) );
-            bc.addToBot( Actions::MakeTempCardInDiscard({CardId::BURN}) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::BURN, 1);
+            Actions::MakeTempCardInDiscard(bc, {CardId::BURN});
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -1005,30 +1003,30 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::RED_LOUSE_BITE:
             attackPlayerHelper(bc, miscInfo);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::RED_LOUSE_GROW:
             buff<MS::STRENGTH>(asc17 ? 4 : 3);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ RED SLAVER ************
 
         case MMID::RED_SLAVER_ENTANGLE:
-            bc.addToBot(Actions::DebuffPlayer<PS::ENTANGLED>(1));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::ENTANGLED>(bc, 1);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::RED_SLAVER_SCRAPE:
             attackPlayerHelper(bc, asc2 ? 9 : 8);
-            bc.addToBot(Actions::DebuffPlayer<PS::VULNERABLE>(asc17 ? 2 : 1));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, asc17 ? 2 : 1);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::RED_SLAVER_STAB:
             attackPlayerHelper(bc, asc2 ? 14 : 13);
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ SENTRY ************
@@ -1036,13 +1034,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         case MMID::SENTRY_BEAM:
             attackPlayerHelper(bc, asc3 ? 10 : 9);
             setMove(MMID::SENTRY_BOLT);
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
         case MMID::SENTRY_BOLT:
-            bc.addToBot(Actions::MakeTempCardInDiscard({CardId::DAZED}, asc18 ? 3 : 2));
+            Actions::MakeTempCardInDiscard(bc, {CardId::DAZED}, asc18 ? 3 : 2);
             setMove(MMID::SENTRY_BEAM);
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
 
 
@@ -1050,13 +1048,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SHELLED_PARASITE_DOUBLE_STRIKE: // 2
             attackPlayerHelper(bc, asc2 ? 7 : 6, 2);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SHELLED_PARASITE_FELL: // 1
             attackPlayerHelper(bc, asc2 ? 21 : 18);
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SHELLED_PARASITE_STUNNED: // 4
@@ -1065,8 +1063,8 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             break;
 
         case MMID::SHELLED_PARASITE_SUCK: // 3
-            bc.addToBot( Actions::VampireAttack(calculateDamageToPlayer(bc, asc2 ? 12 : 10)) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::VampireAttack(bc, calculateDamageToPlayer(bc, asc2 ? 12 : 10));
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ SHIELD GREMLIN ************
@@ -1074,7 +1072,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         case MMID::SHIELD_GREMLIN_PROTECT: {
             const int blockAmounts[] = {7,8,11};
             const int blockAmount = blockAmounts[getTriIdx(asc, 7, 17)];
-            bc.addToBot( Actions::GainBlockRandomEnemy(idx, blockAmount) );
+            Actions::GainBlockRandomEnemy(bc, idx, blockAmount);
             if (bc.monsters.getAliveCount() <= 1)  {
                 setMove(MMID::SHIELD_GREMLIN_SHIELD_BASH);
             }
@@ -1088,7 +1086,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         // ************ SLIME BOSS ************
 
         case MMID::SLIME_BOSS_GOOP_SPRAY:
-            Actions::MakeTempCardInDiscard( {CardId::SLIMED}, asc19 ? 5 : 3).execute(bc);
+            Actions::MakeTempCardInDiscard(bc,  {CardId::SLIMED}, asc19 ? 5 : 3);
             setMove(MMID::SLIME_BOSS_PREPARING);
             break;
 
@@ -1109,13 +1107,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SNAKE_PLANT_CHOMP:
             attackPlayerHelper(bc, asc2 ? 8 : 7, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SNAKE_PLANT_ENFEEBLING_SPORES:
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(2, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 2, true);
+            Actions::DebuffPlayer<PS::WEAK>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
 
@@ -1123,21 +1121,21 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SNECKO_BITE: // 2
             attackPlayerHelper(bc, asc2 ? 18 : 15);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SNECKO_PERPLEXING_GLARE: // 1
-            bc.addToBot( Actions::DebuffPlayer<PS::CONFUSED>() );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::CONFUSED>(bc);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SNECKO_TAIL_WHIP: // 3
             attackPlayerHelper(bc, asc2 ? 10 : 8);
-            bc.addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(2, true) );
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
             if (asc17) {
-                bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(2, true) );
+                Actions::DebuffPlayer<PS::WEAK>(bc, 2, true);
             }
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ SPHERIC_GUARDIAN ************
@@ -1150,13 +1148,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPHERIC_GUARDIAN_ATTACK_DEBUFF: // 4
             attackPlayerHelper(bc, asc2 ? 11 : 10);
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(5, true) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 5, true);
             setMove(MMID::SPHERIC_GUARDIAN_SLAM);
             bc.noOpRollMove();
             break;
 
         case MMID::SPHERIC_GUARDIAN_HARDEN: // 3
-            bc.addToBot( Actions::MonsterGainBlock(idx, 15) );
+            Actions::MonsterGainBlock(bc, idx, 15);
             attackPlayerHelper(bc, asc2 ? 11 : 10);
             setMove(MMID::SPHERIC_GUARDIAN_SLAM);
             bc.noOpRollMove();
@@ -1171,15 +1169,15 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         // ************ SPIKE SLIME M ************
 
         case MMID::SPIKE_SLIME_M_LICK: {
-            bc.addToBot(Actions::DebuffPlayer<PS::FRAIL>(1));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 1);
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::SPIKE_SLIME_M_FLAME_TACKLE: {
             attackPlayerHelper(bc, asc2 ? 10 : 8);
-            bc.addToBot(Actions::MakeTempCardInDiscard(CardInstance(CardId::SLIMED)));
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::MakeTempCardInDiscard(bc, CardInstance(CardId::SLIMED));
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -1187,13 +1185,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPIKE_SLIME_L_FLAME_TACKLE:
             attackPlayerHelper(bc, asc2 ? 18 : 16);
-            bc.addToBot( Actions::MakeTempCardInDiscard({CardId::SLIMED}, 2) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::MakeTempCardInDiscard(bc, {CardId::SLIMED}, 2);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIKE_SLIME_L_LICK: // 4
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(asc17 ? 3 : 2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, asc17 ? 3 : 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIKE_SLIME_L_SPLIT: // 3
@@ -1204,7 +1202,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPIKE_SLIME_S_TACKLE: {
             attackPlayerHelper(bc, asc2 ? 6 : 5);
-            bc.addToBot(Actions::NoOpRollMove());
+            Actions::NoOpRollMove(bc);
             break;
         }
 
@@ -1213,14 +1211,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         case MMID::TASKMASTER_SCOURING_WHIP: // todo buff after calculating damage so no need to add to bot?
             attackPlayerHelper(bc, 7);
             if (asc18) {
-                bc.addToBot( Actions::BuffEnemy<MS::STRENGTH>(idx, 1) );
-                bc.addToBot( Actions::MakeTempCardInDiscard({CardId::WOUND}, 3) );
+                Actions::BuffEnemy<MS::STRENGTH>(bc, idx, 1);
+                Actions::MakeTempCardInDiscard(bc, {CardId::WOUND}, 3);
 
             } else if (asc3) {
-                bc.addToBot( Actions::MakeTempCardInDiscard({CardId::WOUND}, 2) );
+                Actions::MakeTempCardInDiscard(bc, {CardId::WOUND}, 2);
 
             } else {
-                bc.addToBot( Actions::MakeTempCardInDiscard({CardId::WOUND}) );
+                Actions::MakeTempCardInDiscard(bc, {CardId::WOUND});
             }
             bc.noOpRollMove();
             break;
@@ -1252,15 +1250,15 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::THE_CHAMP_EXECUTE: {
             attackPlayerHelper(bc, 10, 2);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::THE_CHAMP_FACE_SLAP: {
             attackPlayerHelper(bc, asc4 ? 14 : 12);
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(2, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 2, true);
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -1273,7 +1271,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::THE_CHAMP_HEAVY_SLASH: {
             attackPlayerHelper(bc, asc4 ? 18 : 16);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -1299,25 +1297,25 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             buff<MS::STRENGTH>(strAmounts[bossDiffIdx]);
             addBlock(blockAmounts[bossDiffIdx]);
 
-            bc.addToBot(Actions::RollMove(idx));
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::THE_COLLECTOR_FIREBALL: // 2
             attackPlayerHelper(bc, asc4 ? 21 : 18);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::THE_COLLECTOR_MEGA_DEBUFF: // 4
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(3, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(3, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::FRAIL>(3, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::WEAK>(bc, 3, true);
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 3, true);
+            Actions::DebuffPlayer<PS::FRAIL>(bc, 3, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::THE_COLLECTOR_SPAWN: // 5, 1(initial spawn)
-            bc.addToBot( Actions::SpawnTorchHeads() );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::SpawnTorchHeads(bc);
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ THE GUARDIAN ************
@@ -1347,12 +1345,12 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             removeStatus<MS::SHARP_HIDE>();
             miscInfo += 10;
             setMove(MMID::THE_GUARDIAN_WHIRLWIND);
-            bc.addToBot( Actions::BuffEnemy<MS::MODE_SHIFT>(idx, miscInfo) );
+            Actions::BuffEnemy<MS::MODE_SHIFT>(bc, idx, miscInfo);
             break;
 
         case MMID::THE_GUARDIAN_VENT_STEAM:
-            bc.addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(2, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(2, true) );
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
+            Actions::DebuffPlayer<PS::WEAK>(bc, 2, true);
             setMove(MMID::THE_GUARDIAN_WHIRLWIND);
             break;
 
@@ -1371,8 +1369,8 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         // ************ SHAPES ************
 
         case MMID::EXPLODER_EXPLODE:
-            bc.addToBot( Actions::DamagePlayer(30) );
-            bc.addToBot( Actions::SuicideAction(idx, true) );
+            Actions::DamagePlayer(bc, 30);
+            Actions::SuicideAction(bc, idx, true);
             bc.noOpRollMove();
             break;
 
@@ -1388,17 +1386,17 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::REPULSOR_BASH: // 2
             attackPlayerHelper(bc, asc2 ? 13 : 11);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::REPULSOR_REPULSE: // 1
-            Actions::ShuffleTempCardIntoDrawPile(CardId::DAZED, 2).execute(bc);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::DAZED, 2);
             rollMove(bc);
             break;
 
         case MMID::SPIKER_CUT: // 1
             attackPlayerHelper(bc, asc2 ? 9 : 7);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIKER_SPIKE: // 2
@@ -1432,14 +1430,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::THE_MAW_SLAM: // 3
             attackPlayerHelper(bc, asc2 ? 30 : 25);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ DARKLING ************
 
         case MMID::DARKLING_CHOMP:
             attackPlayerHelper(bc, asc2 ? 9 : 8);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::DARKLING_HARDEN:
@@ -1453,7 +1451,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
         case MMID::DARKLING_NIP: {
             const auto damage = miscInfo + (asc2 ? 2 : 0); // todo maybe make d part of the miscInfo at prebattle
             attackPlayerHelper(bc, damage);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
         }
 
@@ -1481,17 +1479,17 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPIRE_GROWTH_QUICK_TACKLE: // 1
             attackPlayerHelper(bc, asc2 ? 18 : 16);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIRE_GROWTH_SMASH: // 3
             attackPlayerHelper(bc, asc2 ? 25 : 22);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIRE_GROWTH_CONSTRICT: // 2
             bc.player.debuff<PS::CONSTRICTED>(asc17 ? 12 : 10);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         // ************ TRANSIENT ************
@@ -1501,7 +1499,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             const auto damage = (asc2 ? 40 : 30) + 10*(bc.getMonsterTurnNumber()-1);
             attackPlayerHelper(bc, damage);
             if (getStatus<MS::FADING>() == 1) {
-                bc.addToBot( Actions::SuicideAction(idx, false) );
+                Actions::SuicideAction(bc, idx, false);
             }
             bc.noOpRollMove();
             decrementStatus<MS::FADING>();
@@ -1512,8 +1510,8 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::WRITHING_MASS_FLAIL: // 2
             attackPlayerHelper(bc, asc2 ? 16 : 15);
-            bc.addToBot( Actions::MonsterGainBlock(idx, asc2 ? 18 : 16) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::MonsterGainBlock(bc, idx, asc2 ? 18 : 16);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::WRITHING_MASS_IMPLANT: // 4
@@ -1528,24 +1526,24 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::WRITHING_MASS_MULTI_STRIKE: // 1
             attackPlayerHelper(bc, asc2 ? 9 : 7, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::WRITHING_MASS_STRONG_STRIKE: // 0
             attackPlayerHelper(bc, asc2 ? 38 : 32);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::WRITHING_MASS_WITHER: // 3
             attackPlayerHelper(bc, asc2 ? 12 : 10);
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(2, true) );
-            bc.addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(2, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::WEAK>(bc, 2, true);
+            Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::GIANT_HEAD_COUNT: // 3
             attackPlayerHelper(bc, 13);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::GIANT_HEAD_GLARE: // 1
@@ -1563,14 +1561,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::NEMESIS_ATTACK:
             attackPlayerHelper(bc, asc3 ? 7 : 6, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             if (!hasStatus<MS::INTANGIBLE>()) {
-                bc.addToBot( Actions::BuffEnemy<MS::INTANGIBLE>(idx, 2) );
+                Actions::BuffEnemy<MS::INTANGIBLE>(bc, idx, 2);
             }
             break;
 
         case MMID::NEMESIS_DEBUFF:
-            Actions::MakeTempCardInDiscard({CardId::BURN}, asc3 ? 5 : 3).execute(bc);
+            Actions::MakeTempCardInDiscard(bc, {CardId::BURN}, asc3 ? 5 : 3);
             rollMove(bc);
             if (!hasStatus<MS::INTANGIBLE>()) {
                 buff<MS::INTANGIBLE>(2);
@@ -1579,21 +1577,21 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::NEMESIS_SCYTHE:
             attackPlayerHelper(bc, 45);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             if (!hasStatus<MS::INTANGIBLE>()) {
-                bc.addToBot( Actions::BuffEnemy<MS::INTANGIBLE>(idx, 2) );
+                Actions::BuffEnemy<MS::INTANGIBLE>(bc, idx, 2);
             }
             break;
 
         case MMID::REPTOMANCER_BIG_BITE: // 3
             attackPlayerHelper(bc, asc3 ? 34 : 30);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::REPTOMANCER_SNAKE_STRIKE: // 1
             attackPlayerHelper(bc, asc3 ? 16 : 13, 2);
-            bc.addToBot( Actions::DebuffPlayer<PS::WEAK>(1, true) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::DebuffPlayer<PS::WEAK>(bc, 1, true);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::REPTOMANCER_SUMMON: // 2
@@ -1603,14 +1601,14 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::DAGGER_STAB:
             attackPlayerHelper(bc, 9);
-            bc.addToBot( Actions::MakeTempCardInDiscard(CardId::WOUND) );
+            Actions::MakeTempCardInDiscard(bc, CardId::WOUND);
             setMove(MMID::DAGGER_EXPLODE);
             bc.noOpRollMove();
             break;
 
         case MMID::DAGGER_EXPLODE:
             attackPlayerHelper(bc, 25);
-            bc.addToBot( Actions::SuicideAction(idx, true) );
+            Actions::SuicideAction(bc, idx, true);
             bc.noOpRollMove();
             break;
 
@@ -1626,16 +1624,16 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::TIME_EATER_HEAD_SLAM:
             attackPlayerHelper(bc, asc4 ? 32 : 26);
-            bc.addToBot( Actions::DebuffPlayer<PS::DRAW_REDUCTION>(1, true) );
+            Actions::DebuffPlayer<PS::DRAW_REDUCTION>(bc, 1, true);
             if (asc19) {
-                bc.addToBot( Actions::MakeTempCardInDiscard(CardId::SLIMED, 2) );
+                Actions::MakeTempCardInDiscard(bc, CardId::SLIMED, 2);
             }
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::TIME_EATER_REVERBERATE:
             attackPlayerHelper(bc, asc4 ? 8 : 7, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::TIME_EATER_RIPPLE: // 3
@@ -1661,7 +1659,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::DECA_BEAM:
             attackPlayerHelper(bc, asc4 ? 12 : 10, 2);
-            bc.addToBot( Actions::MakeTempCardInDiscard(CardId::DAZED, 2) );
+            Actions::MakeTempCardInDiscard(bc, CardId::DAZED, 2);
             setMove(MonsterMoveId::DECA_SQUARE_OF_PROTECTION);
             break;
 
@@ -1684,7 +1682,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 assert(false);
             }
             attackPlayerHelper(bc, 40);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::AWAKENED_ONE_REBIRTH: {
@@ -1706,7 +1704,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 assert(false);
             }
             attackPlayerHelper(bc, 20);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::AWAKENED_ONE_SLUDGE:
@@ -1715,8 +1713,8 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 assert(false);
             }
             attackPlayerHelper(bc, 18);
-            bc.addToBot( Actions::ShuffleTempCardIntoDrawPile(CardId::VOID) );
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::VOID);
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::AWAKENED_ONE_SOUL_STRIKE:
@@ -1725,7 +1723,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 assert(false);
             }
             attackPlayerHelper(bc, 6, 4);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::AWAKENED_ONE_TACKLE:
@@ -1734,13 +1732,13 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
                 assert(false);
             }
             attackPlayerHelper(bc, 10, 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::SPIRE_SHIELD_BASH: // 1
             attackPlayerHelper(bc, asc3 ? 14 : 12);
             if (bc.player.orbSlots > 0) {
-                bc.addToBot( Actions::SpireShieldDebuff() );
+                Actions::SpireShieldDebuff(bc);
             } else {
                 bc.player.debuff<PS::STRENGTH>(-1);
             }
@@ -1767,18 +1765,18 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPIRE_SHIELD_SMASH: { // 3
             const auto damageOutput = calculateDamageToPlayer(bc, asc3 ? 38 : 34);
-            bc.addToBot( Actions::AttackPlayer(idx, damageOutput) );
-            bc.addToBot( Actions::MonsterGainBlock(idx, asc18 ? 99 : damageOutput));
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::AttackPlayer(bc, idx, damageOutput);
+            Actions::MonsterGainBlock(bc, idx, asc18 ? 99 : damageOutput);
+            Actions::RollMove(bc, idx);
             break;
         }
 
         case MMID::SPIRE_SPEAR_BURN_STRIKE: // 1
             attackPlayerHelper(bc, asc3 ? 6 : 5, 2);
             if (asc18) {
-                bc.addToBot( Actions::MakeTempCardInDrawPile(CardId::BURN, 2, false) );
+                Actions::MakeTempCardInDrawPile(bc, CardId::BURN, 2, false);
             } else {
-                bc.addToBot( Actions::MakeTempCardInDiscard(CardId::BURN, 2) );
+                Actions::MakeTempCardInDiscard(bc, CardId::BURN, 2);
             }
             if (lastMoveBefore(MonsterMoveId::SPIRE_SPEAR_SKEWER)) {
                 setMove(MonsterMoveId::SPIRE_SPEAR_PIERCER);
@@ -1801,7 +1799,7 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
 
         case MMID::SPIRE_SPEAR_SKEWER: // 3
             attackPlayerHelper(bc, 10, asc3 ? 4 : 3);
-            bc.addToBot( Actions::RollMove(idx) );
+            Actions::RollMove(bc, idx);
             break;
 
         case MMID::CORRUPT_HEART_BLOOD_SHOTS: // 1
@@ -1844,11 +1842,11 @@ void Monster::takeTurn(BattleContext &bc) {     // todo, maybe for monsters that
             bc.player.debuff<PS::VULNERABLE>(2, true);
             bc.player.debuff<PS::WEAK>(2, true);
             bc.player.debuff<PS::FRAIL>(2, true);
-            Actions::ShuffleTempCardIntoDrawPile(CardId::DAZED).execute(bc);
-            Actions::ShuffleTempCardIntoDrawPile(CardId::SLIMED).execute(bc);
-            Actions::ShuffleTempCardIntoDrawPile(CardId::WOUND).execute(bc);
-            Actions::ShuffleTempCardIntoDrawPile(CardId::BURN).execute(bc);
-            Actions::ShuffleTempCardIntoDrawPile(CardId::VOID).execute(bc);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::DAZED);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::SLIMED);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::WOUND);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::BURN);
+            Actions::ShuffleTempCardIntoDrawPile(bc, CardId::VOID);
             rollMove(bc);
             break;
 

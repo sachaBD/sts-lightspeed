@@ -252,7 +252,7 @@ void BattleSimulator::takeNormalAction(const std::string &action) {
         }
 
         assert(targetIdx != -1);
-        bc->addToBotCard( CardQueueItem(card, targetIdx, bc->player.energy) );
+        bc->beginCard( CardPlay(card, targetIdx, bc->player.energy) );
 
 
     } else {

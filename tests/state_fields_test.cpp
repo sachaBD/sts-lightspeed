@@ -18,7 +18,7 @@ void require(bool ok, const char *message) {
 }
 
 // Every leaf of a state's walk, as words.
-template <class State> std::vector<std::uint64_t> leaves(const State &state) {
+std::vector<std::uint64_t> leaves(const BattleContext &state) {
     std::vector<std::uint64_t> out;
     forEachField(state, [&out](const auto &leaf) {
         using T = std::decay_t<decltype(leaf)>;
@@ -32,8 +32,8 @@ template <class State> std::vector<std::uint64_t> leaves(const State &state) {
 }
 
 // A fresh state filled from those words.
-template <class State = BattleContext> State filled(const std::vector<std::uint64_t> &words) {
-    State state;
+BattleContext filled(const std::vector<std::uint64_t> &words) {
+    BattleContext state;
     std::size_t next = 0;
     forEachField(state, [&](auto &leaf) {
         using T = std::decay_t<decltype(leaf)>;
@@ -56,133 +56,94 @@ Action randomAction(const BattleContext &state, std::mt19937_64 &random) {
     return actions[random() % actions.size()];
 }
 
-template <class Effect> void payloadRoundTrip() {
-    Effect effect{};
-    forEachField(effect, [](auto& leaf) {
-        using T = std::decay_t<decltype(leaf)>;
-        leaf = static_cast<T>(1);
-    });
-    const sts::Action original{std::move(effect), false};
-    const auto words = leaves(original);
-    require(leaves(filled<sts::Action>(words)) == words, "action payload did not round trip");
-}
-
-template <std::size_t... I> void allPayloadsRoundTrip(std::index_sequence<I...>) {
-    (payloadRoundTrip<std::variant_alternative_t<I, ActionPayload>>(), ...);
-}
-
-BattleContext fixture() {
+BattleContext fixture(std::initializer_list<CardId> hand) {
     GameContext game{CharacterClass::IRONCLAD, 17, 20};
     BattleContext state;
     state.init(game, MonsterEncounter::JAW_WORM);
-    state.actionQueue.clear();
     state.cards = CardManager{};
+    state.resolution.clear();
+    state.monsters.arr[0].curHp = state.monsters.arr[0].maxHp = 1000;
+    for (auto id : hand) state.cards.createTempCardInHand(CardInstance{id});
     return state;
 }
 
-void queueOrderAndWrap() {
-    ActionQueue<3> queue;
-    auto state = fixture();
-    const auto energy = state.player.energy;
-    int gained = 0;
-    for (int amount = 1; amount < 9; ++amount) {
-        queue.pushBack(Actions::GainEnergy(amount));
-        queue.popFront().execute(state);
-        gained += amount;
-    }
-    queue.pushBack(Actions::GainEnergy(8));
-    queue.pushFront(Actions::GainEnergy(9));
-    queue.pushBack(Actions::GainEnergy(10));
-    auto copy = filled<ActionQueue<3>>(leaves(queue));
-    for (int amount : {9, 8, 10}) {
-        const auto expected = leaves(Actions::GainEnergy(amount));
-        require(leaves(queue.popFront()) == expected && leaves(copy.popFront()) == expected,
-                "restored queue changed order");
-    }
-    require(queue.isEmpty() && copy.isEmpty(), "queue failed to drain");
-    queue.pushBack(Actions::GainEnergy(100));
-    queue.clear();
-    require(queue.isEmpty(), "clear must discard pending actions");
-    queue.pushBack(Actions::GainEnergy(2));
-    queue.popFront().execute(state);
-    require(state.player.energy == energy + gained + 2, "cleared queue could not be reused");
+void play(BattleContext& state, int slot = 0) {
+    const Action action{search::ActionType::CARD, slot, 0};
+    require(action.isValidAction(state), "fixture card must be legal");
+    action.execute(state);
 }
 
-void pendingRetainedCards() {
-    auto state = fixture();
-    state.cards.limbo[0] = CardInstance{CardId::BASH, true};
-    state.cards.limbo[0].uniqueId = 42;
-    state.cards.limbo[0].retain = true;
-    state.addToBot(Actions::RestoreRetainedCards(1));
-    state.addToBot(Actions::SetState(InputState::PLAYER_NORMAL));
-    state.inputState = InputState::EXECUTING_ACTIONS;
+void pickAndCompare(BattleContext& state) {
     auto copy = filled(leaves(state));
-    state.executeActions();
-    copy.executeActions();
-    require(state.cards.cardsInHand == 1 && state.cards.hand[0].uniqueId == 42,
-            "retained card was not restored");
-    require(leaves(state) == leaves(copy), "restored retained-card action lost its card");
-}
-
-void pendingSelection() {
-    auto state = fixture();
-    state.cards.createTempCardInDiscard(CardInstance{CardId::BASH});
-    state.cards.createTempCardInDiscard(CardInstance{CardId::DEFEND_RED});
-    state.addToBot(Actions::HeadbuttAction());
-    state.addToBot(Actions::GainEnergy(3));
-    state.addToBot(Actions::SetState(InputState::PLAYER_NORMAL));
-    state.inputState = InputState::EXECUTING_ACTIONS;
-    state.executeActions();
-    require(state.inputState == InputState::CARD_SELECT && state.actionQueue.size > 0,
-            "selection must pause with queued work");
-    auto copy = filled(leaves(state));
-    const auto action = search::Action::getAllActionsInState(state).front();
+    require(leaves(copy) == leaves(state), "suspended state did not round trip");
+    const auto action = Action::getAllActionsInState(state).front();
     action.execute(state);
     action.execute(copy);
-    require(leaves(state) == leaves(copy), "restored selection resumed differently");
+    require(leaves(copy) == leaves(state), "restored choice resumed differently");
 }
 
-void victoryFlags() {
-    auto state = fixture();
-    state.player.curHp = state.player.maxHp - 5;
-    const int energy = state.player.energy;
-    state.addToBot(Actions::GainEnergy(7));
-    state.addToBot(Actions::HealPlayer(3));
-    state.outcome = Outcome::PLAYER_VICTORY;
-    auto copy = filled(leaves(state));
-    for (auto* battle : {&state, &copy}) {
-        battle->clearPostCombatActions();
-        battle->inputState = InputState::EXECUTING_ACTIONS;
-        battle->executeActions();
-        require(battle->player.energy == energy && battle->player.curHp == battle->player.maxHp - 2,
-                "victory changed clear/survive behavior");
-    }
-    require(leaves(state) == leaves(copy), "restored queue changed victory behavior");
+void cardChoices() {
+    auto state = fixture({CardId::BURNING_PACT, CardId::DEFEND_RED, CardId::STRIKE_RED});
+    for (int i = 0; i < 8; ++i) state.cards.createTempCardInDrawPile(0, CardInstance{CardId::BASH});
+    play(state);
+    require(state.inputState == InputState::CARD_SELECT && state.cards.drawPile.size() == 8,
+            "Burning Pact must wait for its exhaust choice before drawing");
+    pickAndCompare(state);
+    require(state.inputState == InputState::PLAYER_NORMAL && state.cards.drawPile.size() == 6,
+            "Burning Pact must resume its draws and finish");
+    require(state.cards.discardPile.size() == 1 && state.resolution.empty(), "card cleanup did not finish");
 }
 
-void formerlyInlineEffects() {
-    for (int hp : {29, 31}) {
-        auto state = fixture();
-        state.monsters.arr[0].curHp = hp;
-        state.addToBot(Actions::Judgment(0, 30));
-        state.addToBot(Actions::SetState(InputState::PLAYER_NORMAL));
-        state.inputState = InputState::EXECUTING_ACTIONS;
-        auto copy = filled(leaves(state));
-        state.executeActions();
-        copy.executeActions();
-        require(state.monsters.arr[0].isDeadOrEscaped() == (hp <= 30), "Judgment changed its threshold");
-        require(leaves(state) == leaves(copy), "restored Judgment changed behavior");
-    }
-    auto state = fixture();
-    state.monsters.arr[0].addDebuff<MS::POISON>(3, false);
-    state.addToBot(Actions::Catalyst(0, 3));
-    state.addToBot(Actions::SetState(InputState::PLAYER_NORMAL));
-    state.inputState = InputState::EXECUTING_ACTIONS;
-    auto copy = filled(leaves(state));
-    state.executeActions();
-    copy.executeActions();
-    require(state.monsters.arr[0].getStatus<MS::POISON>() == 9, "Catalyst changed its multiplier");
-    require(leaves(state) == leaves(copy), "restored Catalyst changed behavior");
+void nestedAutoplay() {
+    auto state = fixture({CardId::HAVOC, CardId::STRIKE_RED});
+    state.cards.createTempCardInDrawPile(0, CardInstance{CardId::HEADBUTT});
+    state.cards.createTempCardInDiscard(CardInstance{CardId::DEFEND_RED});
+    state.cards.createTempCardInDiscard(CardInstance{CardId::BASH});
+    play(state);
+    require(state.inputState == InputState::CARD_SELECT && state.cardSelectInfo.cardSelectTask == CardSelectTask::HEADBUTT,
+            "autoplay must pause at the nested Headbutt choice");
+    require(state.cards.discardPile.size() == 2, "parent Havoc must remain in play during its child");
+    pickAndCompare(state);
+    require(state.inputState == InputState::PLAYER_NORMAL && state.resolution.empty(), "parent did not resume");
+    require(state.cards.exhaustPile.size() == 1 && state.cards.exhaustPile[0].id == CardId::HEADBUTT,
+            "Havoc must exhaust its played card after the choice");
+}
+
+void exhaustBatch() {
+    auto state = fixture({CardId::FIEND_FIRE, CardId::WOUND, CardId::DEFEND_RED});
+    state.player.buff<PS::DARK_EMBRACE>(1);
+    for (int i = 0; i < 10; ++i) state.cards.createTempCardInDrawPile(0, CardInstance{CardId::STRIKE_RED});
+    play(state);
+    require(state.cards.exhaustPile.size() == 3, "Fiend Fire must exhaust its original hand and itself");
+    require(state.cards.cardsInHand == 3, "exhaust triggers must not exhaust the newly drawn cards");
+    for (int i = 0; i < state.cards.cardsInHand; ++i)
+        require(state.cards.hand[i].id == CardId::STRIKE_RED, "unexpected card remained after Fiend Fire");
+}
+
+void turnChoices() {
+    auto state = fixture({CardId::STRIKE_RED});
+    state.player.buff<PS::TOOLS_OF_THE_TRADE>(2);
+    for (int i = 0; i < 20; ++i) state.cards.createTempCardInDrawPile(0, CardInstance{CardId::DEFEND_RED});
+    Action{search::ActionType::END_TURN}.execute(state);
+    require(state.inputState == InputState::CARD_SELECT, "turn start must pause for the first discard");
+    pickAndCompare(state);
+    require(state.inputState == InputState::CARD_SELECT, "each Tools of the Trade stack must get a choice");
+    pickAndCompare(state);
+    require(state.inputState == InputState::PLAYER_NORMAL && state.resolution.empty(), "turn start did not finish");
+}
+
+void openingChoices() {
+    GameContext game{CharacterClass::IRONCLAD, 31, 20};
+    game.relics.add({RelicId::TOOLBOX});
+    game.relics.add({RelicId::GAMBLING_CHIP});
+    BattleContext state;
+    state.init(game, MonsterEncounter::JAW_WORM);
+    require(state.cardSelectInfo.cardSelectTask == CardSelectTask::DISCOVERY, "Toolbox must open first");
+    pickAndCompare(state);
+    require(state.inputState == InputState::CARD_SELECT && state.cardSelectInfo.cardSelectTask == CardSelectTask::GAMBLE,
+            "Gambling Chip must not overwrite the Toolbox choice");
+    pickAndCompare(state);
+    require(state.inputState == InputState::PLAYER_NORMAL && state.resolution.empty(), "opening choices did not finish");
 }
 
 // The walk names everything play depends on: a copy filled from it plays on exactly like the original.
@@ -193,19 +154,19 @@ void copiesPlayAlike() {
         MonsterEncounter::AUTOMATON, MonsterEncounter::COLLECTOR, MonsterEncounter::REPTOMANCER,
         MonsterEncounter::AWAKENED_ONE, MonsterEncounter::TIME_EATER, MonsterEncounter::DONU_AND_DECA};
     std::mt19937_64 random{11};
-    int copies = 0, queued = 0;
+    int copies = 0, choices = 0;
     for (std::uint64_t seed = 1; seed <= 48; ++seed) {
         GameContext game{CharacterClass::IRONCLAD, seed, 20};
         game.floorNum = 30;
         for (int i = 0; i < 15; ++i) {  // a varied deck, so play reaches many kinds of state
-            Card card{CombatCardPool::getCardAt(CharacterClass::IRONCLAD, static_cast<int>(random() % 70))};
+            Card card{CombatCardPool::getCardAt(CharacterClass::IRONCLAD, static_cast<int>(random() % CombatCardPool::getPoolSize(CharacterClass::IRONCLAD)))};
             card.upgraded = random() % 2;
             game.deck.obtainRaw(card);
         }
         BattleContext state;
         state.init(game, encounters[seed % std::size(encounters)]);
         while (state.outcome == Outcome::UNDECIDED && state.turn < 20) {
-            queued += state.actionQueue.size > 0;
+            choices += state.inputState == InputState::CARD_SELECT;
             auto copy = filled(leaves(state));
             require(leaves(copy) == leaves(state), "a filled state walks like its source");
             ++copies;
@@ -221,19 +182,18 @@ void copiesPlayAlike() {
             randomAction(state, random).execute(state);
         }
     }
-    require(queued > 0, "the fights must exercise queued states");
+    require(choices > 0, "the fights must exercise suspended choices");
     require(copies > 200, "the fights must reach many states");
 }
 }  // namespace
 
 int main() {
     try {
-        allPayloadsRoundTrip(std::make_index_sequence<std::variant_size_v<ActionPayload>>{});
-        queueOrderAndWrap();
-        pendingRetainedCards();
-        pendingSelection();
-        victoryFlags();
-        formerlyInlineEffects();
+        cardChoices();
+        nestedAutoplay();
+        exhaustBatch();
+        turnChoices();
+        openingChoices();
         copiesPlayAlike();
         std::cout << "state fields tests passed\n";
         return 0;

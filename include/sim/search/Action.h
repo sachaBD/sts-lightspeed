@@ -12,7 +12,6 @@
 
 
 #include <iostream>
-#include <tuple>
 
 
 namespace sts {
@@ -37,18 +36,6 @@ namespace sts::search {
         bool accessedHiddenInformation = false;
 
         bool isChance() const { return consumedRng || accessedHiddenInformation; }
-    };
-
-    class TransitionSnapshot {
-    public:
-        explicit TransitionSnapshot(const BattleContext&);
-        TransitionEffects effects(const BattleContext&) const;
-
-    private:
-        using RngState = std::array<std::tuple<std::int32_t, std::uint64_t, std::uint64_t>, 6>;
-        static RngState rngState(const BattleContext&);
-        RngState rng_;
-        std::uint64_t hidden_;
     };
 
     // couldn't make a union work in only 32 bits

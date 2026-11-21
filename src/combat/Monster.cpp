@@ -34,7 +34,7 @@ void Monster::applyStartOfTurnPowers(BattleContext &bc) {
     }
 
     if (hasStatus<MS::POISON>() && !bc.monsters.areMonstersBasicallyDead()) {
-        bc.addToBot(Actions::PoisonLoseHpAction(idx));
+        Actions::PoisonLoseHpAction(bc, idx);
     }
 }
 
@@ -288,17 +288,15 @@ void Monster::die(BattleContext &bc) {
         removeDebuffs();
         removeStatus<MS::CURIOSITY>();
         setMove(MonsterMoveId::AWAKENED_ONE_REBIRTH);
-        bc.cardQueue.clear();
 
     } else if (bc.monsters.monstersAlive == 0 || hasStatus<MS::MINION_LEADER>()) {
-//            bc.cleanCardQueue(); // todo should this really return like this?
         bc.outcome = Outcome::PLAYER_VICTORY;
         return;
     }
 
     if (hasStatus<MS::SPORE_CLOUD>()) {
         // spore cloud always has a value of 2 in game
-        bc.addToTop( Actions::DebuffPlayer<PS::VULNERABLE>(2, bc.turnHasEnded) );
+        Actions::DebuffPlayer<PS::VULNERABLE>(bc, 2, bc.turnHasEnded);
 
     } else if (hasStatus<MS::REGROW>()) {
         resetAllStatusEffects();
@@ -311,18 +309,18 @@ void Monster::die(BattleContext &bc) {
 
     if (hasStatus<MS::CORPSE_EXPLOSION>()) {
         int damage = maxHp * getStatus<MS::CORPSE_EXPLOSION>();
-        bc.addToBot( Actions::DamageAllEnemy(damage) );
+        Actions::DamageAllEnemy(bc, damage);
     }
 
     if (bc.player.hasRelic<RelicId::GREMLIN_HORN>()) {
-        bc.addToBot( Actions::GainEnergy(1) );
-        bc.addToBot( Actions::DrawCards(1) );
+        Actions::GainEnergy(bc, 1);
+        Actions::DrawCards(bc, 1);
     }
 
     if (bc.player.hasRelic<RelicId::THE_SPECIMEN>() && hasStatus<MS::POISON>() &&
         !bc.monsters.areMonstersBasicallyDead()) {
         bc.cardSelectInfo.data0 = getStatus<MS::POISON>();
-        bc.addToBot( Actions::SetState(InputState::SELECT_ENEMY_THE_SPECIMEN_APPLY_POISON) );
+        Actions::SetState(bc, InputState::SELECT_ENEMY_THE_SPECIMEN_APPLY_POISON);
     }
 }
 
@@ -344,7 +342,7 @@ void Monster::attackedUnblockedHelper(BattleContext &bc, int damage) { // todo, 
     }
 
     if (bc.player.hasStatus<PS::ENVENOM>()) {
-        bc.addToTop( Actions::DebuffEnemy<MS::POISON>(this->idx, bc.player.getStatus<PS::ENVENOM>()) );
+        Actions::DebuffEnemy<MS::POISON>(bc, this->idx, bc.player.getStatus<PS::ENVENOM>());
     }
 
     if (hasStatus<MS::INVINCIBLE>()) {
@@ -358,7 +356,7 @@ void Monster::attackedUnblockedHelper(BattleContext &bc, int damage) { // todo, 
         }
 
     } else if (hasStatus<MS::CURL_UP>()) {
-        bc.addToBot(Actions::MonsterGainBlock(this->idx, getStatus<MS::CURL_UP>()) );
+        Actions::MonsterGainBlock(bc, this->idx, getStatus<MS::CURL_UP>());
         setHasStatus<MS::CURL_UP>(false);
 
     } else if (hasStatus<MS::FLIGHT>() && damage > 0) {
@@ -371,13 +369,13 @@ void Monster::attackedUnblockedHelper(BattleContext &bc, int damage) { // todo, 
     } else if (hasStatus<MS::MALLEABLE>() || hasStatus<MS::REACTIVE>()) {
         if (hasStatus<MS::MALLEABLE>()) {
             const auto malleable = getStatus<MS::MALLEABLE>();
-            bc.addToBot( Actions::MonsterGainBlock(this->idx, malleable) );
+            Actions::MonsterGainBlock(bc, this->idx, malleable);
             setStatus<MS::MALLEABLE>(malleable+1);
         }
         if (hasStatus<MS::REACTIVE>()) {
             if (getStatus<MS::REACTIVE>() == 0) {
                 setStatus<MS::REACTIVE>(1);
-                bc.addToBot( Actions::ReactiveRollMove() );
+                Actions::ReactiveRollMove(bc);
 
             } else {
                 setStatus<MS::REACTIVE>(getStatus<MS::REACTIVE>()+1);
@@ -385,7 +383,7 @@ void Monster::attackedUnblockedHelper(BattleContext &bc, int damage) { // todo, 
         }
 
     } else if (hasStatus<MS::THORNS>()) {
-        bc.addToTop( Actions::DamagePlayer(getStatus<MS::THORNS>()) );
+        Actions::DamagePlayer(bc, getStatus<MS::THORNS>());
 
     } else if (hasStatus<MS::ASLEEP>()) {
         // lagavulin
@@ -433,7 +431,7 @@ void Monster::attacked(BattleContext &bc, int damage) {
     block = std::max(0, block - tempDamage);
 
     if (hadBlock && block == 0 && bc.player.hasRelic<RelicId::HAND_DRILL>()) {
-        bc.addToBot(Actions::DebuffEnemy<MS::VULNERABLE>(idx, 2, false) );
+        Actions::DebuffEnemy<MS::VULNERABLE>(bc, idx, 2, false);
     }
 
     if (damage > 0) { // todo can damage be zero???
@@ -488,7 +486,7 @@ void Monster::damage(BattleContext &bc, int damage) {
     block = std::max(0, block-tempDamage);
 
     if (hadBlock && block == 0 && bc.player.hasRelic<RelicId::HAND_DRILL>()) {
-        bc.addToBot(Actions::DebuffEnemy<MS::VULNERABLE>(idx, 2, false) );
+        Actions::DebuffEnemy<MS::VULNERABLE>(bc, idx, 2, false);
     }
 
     if (damage > 0) {
@@ -525,7 +523,7 @@ void Monster::onHpLost(BattleContext &bc, int amount) {
                 if (newModeShiftAmount <= 0) {
                     removeStatus<MS::MODE_SHIFT>();
                     setMove(MMID::THE_GUARDIAN_DEFENSIVE_MODE);
-                    bc.addToBot( Actions::MonsterGainBlock(idx, 20) );
+                    Actions::MonsterGainBlock(bc, idx, 20);
                 } else {
                     setStatus<MS::MODE_SHIFT>(newModeShiftAmount);
                 }
@@ -603,8 +601,8 @@ int Monster::calculateDamageToPlayer(const BattleContext &bc, int baseDamage) co
 void Monster::attackPlayerHelper(BattleContext &bc, int baseDamage, int times) {
     const int damage = calculateDamageToPlayer(bc, baseDamage);
 
-    for (int i = 0; i < times; i++) {
-        bc.addToBot(Actions::AttackPlayer(idx, damage));
+    for (int i = 0; i < times && isAlive() && bc.outcome == Outcome::UNDECIDED; i++) {
+        Actions::AttackPlayer(bc, idx, damage);
     }
 }
 

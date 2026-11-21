@@ -206,23 +206,23 @@ std::ostream &CardInstance::printSimpleDesc(std::ostream &os) const {
 
 void CardInstance::triggerOnExhaust(BattleContext &bc) {
     if (id == CardId::SENTINEL) {
-        bc.addToTop( Actions::GainEnergy(upgraded ? 3 : 2) );
+        Actions::GainEnergy(bc, upgraded ? 3 : 2);
     } else if (id == CardId::CURSE_OF_THE_BELL) {
-        bc.addToBot(Actions::MakeTempCardInHand(CardId::CURSE_OF_THE_BELL) );
+        Actions::MakeTempCardInHand(bc, CardId::CURSE_OF_THE_BELL);
     }
 }
 
 void CardInstance::triggerOnManualDiscard(BattleContext &bc) {
     if (id == CardId::REFLEX) {
-        bc.addToBot( Actions::DrawCards(upgraded ? 3 : 2) );
+        Actions::DrawCards(bc, upgraded ? 3 : 2);
     } else if (id == CardId::TACTICIAN) {
-        bc.addToTop( Actions::GainEnergy(upgraded ? 2 : 1) );
+        Actions::GainEnergy(bc, upgraded ? 2 : 1);
     }
 }
 
 void CardInstance::triggerWhenDrawn(BattleContext &bc, int myHandIdx) {
     if (id == CardId::ENDLESS_AGONY) {
-        bc.addToBot(Actions::MakeTempCardInHand(CardInstance(id, upgraded)));
+        Actions::MakeTempCardInHand(bc, CardInstance(id, upgraded));
     } else if (id == CardId::EVISCERATE) {
         setCostForTurn(std::max(0, static_cast<int>(cost) - bc.player.cardsDiscardedThisTurn));
     }
@@ -231,8 +231,7 @@ void CardInstance::triggerWhenDrawn(BattleContext &bc, int myHandIdx) {
 //void CardInstance::triggerWhenDrawn(BattleContext &bc, int myHandIdx) {
 //    switch (id) {
 //        case CardId::ENDLESS_AGONY:
-//            //addToTop((AbstractGameAction)new MakeTempCardInHandAction(makeStatEquivalentCopy()));
-//            bc.addToTop(Actions::MakeTempCardInHand(id, upgraded) );
+//            Actions::MakeTempCardInHand(bc, id, upgraded);
 //            break;
 //        case CardId::EVISCERATE:
 //            //setCostForTurn(this.cost - GameActionManager.totalDiscardedThisTurn);
@@ -240,16 +239,14 @@ void CardInstance::triggerWhenDrawn(BattleContext &bc, int myHandIdx) {
 //            break;
 //
 //        case CardId::DEUS_EX_MACHINA:
-//            bc.addToTop(Actions::MakeTempCardInHand(CardId::MIRACLE, upgraded ? 3 : 2));
-//            bc.addToTop(Actions::ExhaustSpecificCardInHand(myHandIdx) );
+//            Actions::MakeTempCardInHand(bc, CardId::MIRACLE, upgraded ? 3 : 2);
+//            Actions::ExhaustSpecificCardInHand(bc, myHandIdx);
 //            break;
 //
 //        case CardId::VOID:
-//            bc.addToBot( [](BattleContext &bc){ bc.player.energy = std::max(0, bc.player.energy-1); } );
 //            break;
 //
 //            // case CardId::DOUBT:
-//            // addToBot((AbstractGameAction)new SetDontTriggerAction(this, false));
 //        default:
 //            break;
 //    }
