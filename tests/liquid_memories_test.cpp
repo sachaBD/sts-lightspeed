@@ -40,7 +40,7 @@ int main() {
                     "returned card is not playable at zero energy");
         }
         auto hologram = fixture(sts::CardSelectTask::LIQUID_MEMORIES_POTION);
-        hologram.addToBot(sts::Actions::BetterDiscardPileToHandAction(1, sts::CardSelectTask::HOLOGRAM));
+        sts::Actions::BetterDiscardPileToHandAction(hologram, 1, sts::CardSelectTask::HOLOGRAM);
         hologram.inputState = sts::InputState::EXECUTING_ACTIONS;
         hologram.executeActions();
         require(hologram.cards.hand[0].costForTurn == 2, "non-free recovery inherited old Liquid Memories task");

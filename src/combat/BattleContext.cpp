@@ -5,6 +5,7 @@
 #include "combat/BattleContext.h"
 #include "game/GameContext.h"
 #include "game/Game.h"
+#include <stdexcept>
 
 namespace sts {
     thread_local BattleContext *g_debug_bc;
@@ -41,8 +42,8 @@ void BattleContext::init(const GameContext &gc, MonsterEncounter encounterToInit
     turnHasEnded = false;
     isBattleOver = false;
 
-    actionQueue.clear();
-    cardQueue.clear();
+    resolution.clear();
+    endTurnRequested = false;
 
     potionCount = gc.potionCount;
     potionCapacity = gc.potionCapacity;
@@ -68,13 +69,14 @@ void BattleContext::init(const GameContext &gc, MonsterEncounter encounterToInit
     if (gc.relics.has(R::RING_OF_THE_SERPENT)) {
         player.cardDrawPerTurn += 1;
     }
-    //addToBot(Actions::DrawCards(player.cardDrawPerTurn));
+    //Actions::DrawCards(*this, player.cardDrawPerTurn);
 
     cards.init(gc, *this);
 
     initRelics(gc);
     player.energy += player.energyPerTurn;
 
+    resolution.push_back({ResolutionPhase::InitialToolbox});
     executeActions();
 }
 
@@ -143,7 +145,7 @@ void BattleContext::initRelics(const GameContext &gc) {
                 const auto cardId = getTrulyRandomCardInCombat(cardRandomRng, p.cc, CardType::POWER);
                 CardInstance c(cardId);
                 c.setCostForTurn(0);
-                addToBot( Actions::MakeTempCardInHand(c) );
+                Actions::MakeTempCardInHand(*this, c);
                 break;
             }
 
@@ -370,19 +372,18 @@ void BattleContext::initRelics(const GameContext &gc) {
     for (auto r : atBattleStartPreDraw) {
         switch (r) {
             case R::HOLY_WATER:
-                addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE, false, 3));
+                Actions::MakeTempCardInHand(*this, CardId::MIRACLE, false, 3);
                 break;
 
             case R::NINJA_SCROLL:
-                addToBot(Actions::MakeTempCardInHand(CardId::SHIV, false, 3) );
+                Actions::MakeTempCardInHand(*this, CardId::SHIV, false, 3);
                 break;
 
             case R::PURE_WATER:
-                addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE, false, 1));
+                Actions::MakeTempCardInHand(*this, CardId::MIRACLE, false, 1);
                 break;
 
             case R::TOOLBOX:
-                addToBot( Actions::ToolboxAction() );
                 break;
 
             default:
@@ -390,20 +391,20 @@ void BattleContext::initRelics(const GameContext &gc) {
         }
     }
 
-    addToBot( Actions::DrawCards(p.cardDrawPerTurn) );
+    Actions::DrawCards(*this, p.cardDrawPerTurn);
 
     for (auto r : atBattleStart) {
         switch (r) {
             case R::BAG_OF_MARBLES:
-                addToBot( Actions::DebuffAllEnemy<MS::VULNERABLE>(1, false) );
+                Actions::DebuffAllEnemy<MS::VULNERABLE>(*this, 1, false);
                 break;
 
             case R::BAG_OF_PREPARATION:
-                addToBot( Actions::DrawCards(2) );
+                Actions::DrawCards(*this, 2);
                 break;
 
             case R::CLOCKWORK_SOUVENIR:
-                addToBot( Actions::BuffPlayer<PS::ARTIFACT>(1) );
+                Actions::BuffPlayer<PS::ARTIFACT>(*this, 1);
                 break;
 
             case R::GREMLIN_VISAGE:
@@ -411,19 +412,19 @@ void BattleContext::initRelics(const GameContext &gc) {
                 break;
 
             case R::MARK_OF_PAIN:
-                addToBot( Actions::MakeTempCardInDrawPile( {CardId::WOUND}, 2, true) );
+                Actions::MakeTempCardInDrawPile(*this,  {CardId::WOUND}, 2, true);
                 break;
 
             case R::RED_MASK:
-                addToBot( Actions::DebuffAllEnemy<MS::WEAK>(1) );
+                Actions::DebuffAllEnemy<MS::WEAK>(*this, 1);
                 break;
 
             case R::RING_OF_THE_SNAKE:
-                addToBot( Actions::DrawCards(2) );
+                Actions::DrawCards(*this, 2);
                 break;
 
             case R::TWISTED_FUNNEL:
-                addToBot( Actions::DebuffAllEnemy<MS::POISON>(4) );
+                Actions::DebuffAllEnemy<MS::POISON>(*this, 4);
                 break;
 
             default:
@@ -432,7 +433,7 @@ void BattleContext::initRelics(const GameContext &gc) {
     }
 
     if (gc.hasRelic(R::MERCURY_HOURGLASS)) {
-        addToBot( Actions::DamageAllEnemy(3) );
+        Actions::DamageAllEnemy(*this, 3);
     }
 
     if (gc.hasRelic(R::RED_SKULL) && gc.curHp <= gc.maxHp / 2) {
@@ -442,11 +443,10 @@ void BattleContext::initRelics(const GameContext &gc) {
     for (auto r : atTurnStartPostDraw) {
         switch (r) {
             case R::GAMBLING_CHIP:
-                addToBot( Actions::GambleAction() );
                 break;
 
             case R::WARPED_TONGS:
-                addToBot( Actions::UpgradeRandomCardAction() );
+                Actions::UpgradeRandomCardAction(*this);
                 break;
 
             default:
@@ -641,7 +641,7 @@ void BattleContext::updateCardsOnExit(Deck &deck) const {
         cardOnExit(cards.hand[i], deck);
     }
 
-//    if (curCardQueueItem)
+//    if (currentCard)
 
 }
 
@@ -662,62 +662,17 @@ void BattleContext::setState(InputState s) {
     inputState = s;
 }
 
-void BattleContext::addToTop(const Action &a) {
-    actionQueue.pushFront(a);
-}
-
-void BattleContext::addToBot(const Action &a) {
-    actionQueue.pushBack(a);
-}
-
-// todo remove or replace other method that does this
-void BattleContext::addToTopCard(CardQueueItem item) {
-    cardQueue.pushFront(item);
-}
-
-void BattleContext::addToBotCard(CardQueueItem item) {
-    cardQueue.pushBack(item);
+void BattleContext::beginCard(CardPlay item) {
+    if (outcome == Outcome::UNDECIDED) resolution.push_back({ResolutionPhase::CardPrepare, item});
 }
 
 void BattleContext::checkCombat() {
-    if (outcome == Outcome::PLAYER_VICTORY) {
-        clearPostCombatActions();
+    if (outcome != Outcome::PLAYER_VICTORY) return;
+    for (auto& frame : resolution) {
+        if (!frame.isCard()) frame.phase = ResolutionPhase::Done;
+        else if (frame.phase == ResolutionPhase::CardPrepare) frame.phase = ResolutionPhase::CardDone;
+        else if (frame.phase != ResolutionPhase::CardDone) frame.phase = ResolutionPhase::CardCleanup;
     }
-}
-
-void BattleContext::clearPostCombatActions() {
-    // todo?
-    cleanCardQueue(); // this is actually done when monsters are damaged but we can do here?
-//    actionQueue.clearOnCombatVictory();
-
-    int curIdx = actionQueue.front;
-    int placeIdx = actionQueue.front;
-
-    int oldsize = actionQueue.size;
-    for (int i = 0; i < oldsize; ++i) {
-        if (curIdx >= actionQueue.getCapacity()) {
-            curIdx = 0;
-        }
-        const bool shouldClear = actionQueue.bits[curIdx];
-
-        if (shouldClear) {
-            --actionQueue.size;
-        } else {
-            if (placeIdx >= actionQueue.getCapacity()) {
-                placeIdx = 0;
-            }
-
-            actionQueue.arr[placeIdx] = actionQueue.arr[curIdx];
-            actionQueue.bits[placeIdx] = actionQueue.bits[curIdx];
-            ++placeIdx;
-        }
-        ++curIdx;
-    }
-}
-
-void BattleContext::cleanCardQueue() {
-    // todo
-    // not sure where this matters, as we don't queue more than 1 item at a time in the hand
 }
 
 bool BattleContext::isCardPlayAllowed() const {
@@ -733,218 +688,161 @@ bool BattleContext::isCardPlayAllowed() const {
 }
 
 void BattleContext::executeActions() {
-    // todo find a place for checking where card queue is empty and player doesn't have control for calling onEndingTurn
     ++sum;
     g_debug_bc = this;
-
-    while (true)
-    {
-        if (++loopCount > 1000000 || monsters.monstersAlive < 0 || turn > 500) {
-            // something went wrong
-            if (turn > 500) {
-                outcome = Outcome::PLAYER_LOSS;
-                break;
+    using P = ResolutionPhase;
+    for (;;) {
+        if (++loopCount > 1000000 || turn > 500) throw std::runtime_error{"combat resolution limit"};
+        if (outcome == Outcome::PLAYER_LOSS) { resolution.clear(); return; }
+        if (inputState != InputState::EXECUTING_ACTIONS && outcome == Outcome::UNDECIDED) return;
+        if (resolution.empty()) {
+            if (outcome != Outcome::UNDECIDED) return;
+            if (endTurnRequested) {
+                endTurnRequested = false;
+                resolution.push_back({P::EndRelics});
+                continue;
             }
-
-            std::cerr << seed << std::endl;
-            std::cout << *this << '\n';
-            assert(false);
-        }
-
-        if (inputState != InputState::EXECUTING_ACTIONS) {
-            break;
-        }
-
-        if (outcome == Outcome::PLAYER_LOSS) {
-            break;
-        }
-
-        if (!actionQueue.isEmpty()) {
-            // do a action
-            auto a = std::move(actionQueue.popFront());
-            a.execute(*this);
-            continue;
-        }
-
-        if (outcome != Outcome::UNDECIDED) {
-            break;
-        }
-
-        if (!cardQueue.isEmpty()) {
-            // play a card queue item
-            auto item = cardQueue.popFront();
-            playCardQueueItem(item);
-            continue;
-        }
-
-        // can't win check
-        if (cards.cardsInHand + cards.discardPile.size() + cards.drawPile.size() == 0) {
-            bool hasDamageWithoutCards = player.hasStatus<PS::OMEGA>() ||
-                    player.hasStatus<PS::THORNS>() ||
-                    player.hasStatus<PS::COMBUST>() ||      // damages every end of turn
-                    player.hasStatus<PS::JUGGERNAUT>() ||   // damages on block gain (Metallicize, ...)
-                    player.bomb1 ||
-                    player.bomb2 ||
-                    player.bomb3;
-
-            if (!hasDamageWithoutCards && monsters.arr[0].id != MonsterId::TRANSIENT) {
+            if (player.hasRelic<R::UNCEASING_TOP>() && cards.cardsInHand == 0) drawCards(1);
+            if (outcome != Outcome::UNDECIDED) return;
+            const bool noCards = cards.cardsInHand + cards.drawPile.size() + cards.discardPile.size() == 0;
+            const bool otherDamage = player.hasStatus<PS::OMEGA>() || player.hasStatus<PS::THORNS>() ||
+                player.hasStatus<PS::COMBUST>() || player.hasStatus<PS::JUGGERNAUT>() ||
+                player.bomb1 || player.bomb2 || player.bomb3;
+            if (noCards && !otherDamage && monsters.arr[0].id != MonsterId::TRANSIENT)
                 outcome = Outcome::PLAYER_LOSS;
+            inputState = InputState::PLAYER_NORMAL;
+            return;
+        }
+        const auto index = resolution.size() - 1;
+        const auto phase = resolution[index].phase;
+        const bool card = resolution[index].isCard();
+        if (card) currentCard = resolution[index].card;
+        // Advance before calling effects: a nested card may push another frame or request a choice.
+        switch (phase) {
+            case P::InitialToolbox:
+                resolution[index].phase = P::InitialGamble;
+                if (player.hasRelic<R::TOOLBOX>()) Actions::ToolboxAction(*this);
                 break;
-            }
-        }
-
-        if (outcome != Outcome::UNDECIDED) {
-            break;
-        }
-
-        if (monsterTurnIdx < monsters.monsterCount) {
-            // do a monster turn
-            monsters.doMonsterTurn(*this);
-            continue;
-        }
-        monsters.skipTurn.reset();
-
-        if (outcome != Outcome::UNDECIDED) {
-            break;
-        }
-
-        if (turnHasEnded) {
-            // after all monster turns
-            afterMonsterTurns();
-            continue;
-
-        }
-
-        if (endTurnQueued) {
-            endTurnQueued = false;
-            onTurnEnding();
-            continue;
-
-        }
-
-        if (player.hasRelic<R::UNCEASING_TOP>()) {
-            // turn cannot have ended here
-#ifdef sts_asserts
-            assert(!endTurnQueued);
-            assert(actionQueue.isEmpty());
-            assert(cardQueue.isEmpty());
-#endif
-
-            if (cards.cardsInHand == 0) {
-                drawCards(1);
-                if (!actionQueue.isEmpty()) {
-                    continue;  // an empty draw pile queued a shuffle + draw: do it now, not after the next action
+            case P::InitialGamble:
+                resolution[index].phase = P::Done;
+                if (player.hasRelic<R::GAMBLING_CHIP>()) Actions::GambleAction(*this);
+                break;
+            case P::CardPrepare:
+                resolution[index].phase = prepareCard() ? P::CardEffects : P::CardDone;
+                break;
+            case P::CardEffects:
+                resolution[index].phase = P::CardAfterChoice;
+                if (outcome != Outcome::UNDECIDED) break;
+                switch (currentCard.card.getType()) {
+                    case CardType::ATTACK: useAttackCard(); break;
+                    case CardType::SKILL: useSkillCard(); break;
+                    case CardType::POWER: usePowerCard(); break;
+                    case CardType::STATUS: case CardType::CURSE: onUseStatusOrCurseCard(); break;
+                    default: break;
                 }
-            }
+                break;
+            case P::CardAfterChoice:
+                resolution[index].phase = P::CardTriggers;
+                if (resolution[index].drawsAfterChoice) Actions::DrawCards(*this, resolution[index].drawsAfterChoice);
+                break;
+            case P::CardTriggers:
+                resolution[index].phase = P::CardCleanup;
+                if (outcome != Outcome::UNDECIDED) break;
+                switch (currentCard.card.getType()) {
+                    case CardType::ATTACK: onUseAttackCard(); break;
+                    case CardType::SKILL: onUseSkillCard(); break;
+                    case CardType::POWER: onUsePowerCard(); break;
+                    default: break;
+                }
+                break;
+            case P::CardCleanup:
+                resolution[index].phase = P::CardDone;
+                onAfterUseCard();
+                break;
+            case P::EndRelics:
+                resolution[index].phase = P::EndPowers;
+                callEndOfTurnActions();
+                break;
+            case P::EndPowers:
+                resolution[index].phase = P::EndDiscard;
+                onTurnEnding();
+                break;
+            case P::EndDiscard:
+                resolution[index].phase = P::Monsters;
+                discardAtEndOfTurn();
+                turnHasEnded = true;
+                monsterTurnIdx = 0;
+                if (!skipMonsterTurn) monsters.applyPreTurnLogic(*this);
+                break;
+            case P::Monsters:
+                if (!skipMonsterTurn && monsterTurnIdx < monsters.monsterCount) monsters.doMonsterTurn(*this);
+                else { monsters.skipTurn.reset(); resolution[index].phase = P::RoundEnd; }
+                break;
+            case P::RoundEnd:
+                resolution[index].phase = P::StartPowers;
+                afterMonsterTurns();
+                break;
+            case P::StartPowers:
+                resolution[index].phase = P::StartDraw;
+                player.applyStartOfTurnPowers(*this);
+                break;
+            case P::StartDraw:
+                resolution[index].phase = P::StartDiscards;
+                resolution[index].remainingDiscards = player.getStatus<PS::TOOLS_OF_THE_TRADE>();
+                finishStartTurn();
+                break;
+            case P::StartDiscards:
+                if (resolution[index].remainingDiscards > 0) {
+                    --resolution[index].remainingDiscards;
+                    Actions::DiscardOne(*this);
+                } else resolution[index].phase = P::Done;
+                break;
+            case P::CardDone: case P::Done:
+                resolution.pop_back();
+                continue;
         }
-
-        setState(InputState::PLAYER_NORMAL);
-        break;
+        if (card) resolution[index].card = currentCard;
+        checkCombat();
     }
 }
 
-void BattleContext::playCardQueueItem(CardQueueItem playItem) {
-    // if c is null callEndOfTurnActions()
-    // if cardQueueSize is 1 and carditem is endTurnAutoplay diable unceasing top
-
-    curCardQueueItem = playItem;
-    auto &item = curCardQueueItem;
-    auto &c = item.card;
-
-    if (item.isEndTurn) {
-        // the game removes this card from limbo - don't think necessary
-        callEndOfTurnActions();
-        return;
-    }
-
-
-    // if cardQueueItem random target, assign a target
-    if (item.randomTarget) {
-        item.target = monsters.getRandomMonsterIdx(cardRandomRng);
-    }
-
-//    bool canPlayCard = false; // not really sure what this is used for
-    const bool canUseCard = item.purgeOnUse || (item.triggerOnUse && c.canUse(*this, item.target, item.autoplay) && (!c.requiresTarget() || monsters.arr[item.target].isTargetable()));
-    if (canUseCard) { // not sure if this is correct,
-//        canPlayCard = true; // what is this for......
-
-        if (c.isFreeToPlay(*this)) { // what the fuck
-            c.freeToPlayOnce = true;
-        }
-
-        if (c.requiresTarget()) {
-            player.lastTargetedMonster = item.target;
-        }
-
-        if (!c.requiresTarget() || monsters.arr[item.target].isTargetable()) { // this is redundant right???? -> no i think echo form abilities can queue a card with invalid target
-            useCard();
-        }
-
-    }
-
-    if (!item.triggerOnUse) {
-        useNoTriggerCard(); // for burn, decay, doubt, regret and shame,
-    }
-}
-
-void BattleContext::useCard() {
-    auto &item = curCardQueueItem;
-    auto &c = item.card;
-
-    item.exhaustOnUse |= c.doesExhaust();
+bool BattleContext::prepareCard() {
+    auto& item = currentCard;
+    auto& c = item.card;
+    if (item.randomTarget) item.target = monsters.getRandomMonsterIdx(cardRandomRng);
+    if (!item.triggerOnUse) { useNoTriggerCard(); return false; }
+    const bool usable = item.purgeOnUse || (c.canUse(*this, item.target, item.autoplay) &&
+        (!c.requiresTarget() || monsters.arr[item.target].isTargetable()));
+    if (!usable) return false;
+    if (c.isFreeToPlay(*this)) c.freeToPlayOnce = true;
+    if (c.requiresTarget()) player.lastTargetedMonster = item.target;
+    item.exhaustOnUse |= c.doesExhaust() || (c.getType() == CardType::SKILL && player.hasStatus<PS::CORRUPTION>());
     ++player.cardsPlayedThisTurn;
-
-    switch (c.getType()) {
-        case CardType::ATTACK:
-            useAttackCard();
-            onUseAttackCard();
-            break;
-
-        case CardType::SKILL:
-            useSkillCard();
-            onUseSkillCard();
-            if (player.hasStatus<PS::CORRUPTION>()) {
-                item.exhaustOnUse = true;
-            }
-            break;
-
-        case CardType::POWER:
-            usePowerCard();
-            onUsePowerCard();
-            break;
-
-        case CardType::STATUS:
-        case CardType::CURSE:
-            onUseStatusOrCurseCard();
-            break;
-
-        default:
-            // unreachable
-            break;
-    }
-
-    addToBot(Actions::OnAfterCardUsed());
     triggerOnOtherCardPlayed(c);
-
-    if (!item.purgeOnUse) { // todo change to checking the card queue item
+    if (!item.purgeOnUse) {
         cards.removeFromHandById(c.uniqueId);
-        if (c.costForTurn > 0 && !c.isFreeToPlay(*this) && !item.autoplay && !(player.hasStatus<PS::CORRUPTION>() && c.getType() == CardType::SKILL)) {
-            player.useEnergy(c.costForTurn);
-        }
+        if (c.costForTurn > 0 && !c.isFreeToPlay(*this) && !item.autoplay &&
+            !(player.hasStatus<PS::CORRUPTION>() && c.getType() == CardType::SKILL)) player.useEnergy(c.costForTurn);
     }
+    return true;
+}
+
+void BattleContext::drawAfterChoice(int count) {
+    if (inputState == InputState::CARD_SELECT) resolution.back().drawsAfterChoice = count;
+    else drawCards(count);
 }
 
 void BattleContext::useNoTriggerCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     switch (c.id) {
         case CardId::BURN:
-            addToTop( Actions::DamagePlayer(c.isUpgraded() ? 4 : 2, true));
+            Actions::DamagePlayer(*this, c.isUpgraded() ? 4 : 2, true);
             break;
 
         case CardId::DECAY:
-            addToTop( Actions::DamagePlayer(2, true));
+            Actions::DamagePlayer(*this, 2, true);
             break;
 
         case CardId::DOUBT:
@@ -952,7 +850,7 @@ void BattleContext::useNoTriggerCard() {
             break;
 
         case CardId::REGRET:
-            addToTop( Actions::PlayerLoseHp(item.regretCardCount, true));
+            Actions::PlayerLoseHp(*this, item.regretCardCount, true);
             break;
 
         case CardId::SHAME:
@@ -971,11 +869,11 @@ void BattleContext::useNoTriggerCard() {
     }
 
     cards.removeFromHandById(c.uniqueId);
-    addToBot(Actions::DiscardNoTriggerCard()); // todo what if havoc plays one of these
+    Actions::DiscardNoTriggerCard(*this); // todo what if havoc plays one of these
 }
 
 void BattleContext::useAttackCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     const auto t = item.target;
@@ -987,153 +885,152 @@ void BattleContext::useAttackCard() {
         case CardId::STRIKE_BLUE:
         case CardId::STRIKE_GREEN:
         case CardId::STRIKE_PURPLE: {
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 9 : 6)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 9 : 6));
             break;
         }
 
         case CardId::ANGER:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 8 : 6)) );
-            addToBot( Actions::MakeTempCardInDiscard( CardInstance(CardId::ANGER, up), 1) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 8 : 6));
+            Actions::MakeTempCardInDiscard(*this,  CardInstance(CardId::ANGER, up), 1);
             break;
 
         case CardId::ALL_FOR_ONE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 14 : 10)));
-            addToBot(Actions::AllForOneAction());
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 14 : 10));
+            Actions::AllForOneAction(*this);
             break;
 
         case CardId::ALL_OUT_ATTACK:
-            addToBot(Actions::AttackAllEnemy((up ? 14 : 10) + player.getStatus<PS::VIGOR>()));
-            addToBot(Actions::RandomDiscardAction());
+            Actions::AttackAllEnemy(*this, (up ? 14 : 10) + player.getStatus<PS::VIGOR>());
+            Actions::RandomDiscardAction(*this);
             break;
 
         case CardId::BACKSTAB:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 15 : 11)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 15 : 11));
             break;
 
         case CardId::BASH:
-            // technically calculate attack damage is called first, keep note if we optimize addToBot later
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 8)) );
-            addToBot( Actions::DebuffEnemy<MS::VULNERABLE>(t, up ? 3 : 2, false) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 8));
+            Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, up ? 3 : 2, false);
             break;
 
         case CardId::BOWLING_BASH: {
             int count = 0;
             for (int i = 0; i < monsters.monsterCount; ++i) count += !monsters.arr[i].isDeadOrEscaped();
             const int damage = calculateCardDamage(c, t, up ? 8 : 7);
-            for (int i = 0; i < count; ++i) addToBot(Actions::AttackEnemy(t, damage));
+            for (int i = 0; i < count; ++i) Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::CONSECRATE:
-            addToBot(Actions::AttackAllEnemy((up ? 8 : 5) + player.getStatus<PS::VIGOR>()));
+            Actions::AttackAllEnemy(*this, (up ? 8 : 5) + player.getStatus<PS::VIGOR>());
             break;
 
         case CardId::CONCLUDE:
-            addToBot(Actions::AttackAllEnemy((up ? 16 : 12) + player.getStatus<PS::VIGOR>()));
+            Actions::AttackAllEnemy(*this, (up ? 16 : 12) + player.getStatus<PS::VIGOR>());
             endTurnAfterCurrentCard = true;
             break;
 
         case CardId::BANE: {
             const int baseDamage = up ? 10 : 7;
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, baseDamage)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, baseDamage));
             if (monsters.arr[t].hasStatus<MS::POISON>()) {
-                addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, baseDamage)));
+                Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, baseDamage));
             }
             break;
         }
 
         case CardId::MASTERFUL_STAB:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 16 : 12)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 16 : 12));
             break;
 
         case CardId::BARRAGE: {
             const int damage = calculateCardDamage(c, t, up ? 6 : 4);
             for (int i = 0; i < player.orbSlots; ++i) {
                 if (player.orbs[i] != Orb::EMPTY) {
-                    addToBot(Actions::AttackEnemy(t, damage));
+                    Actions::AttackEnemy(*this, t, damage);
                 }
             }
             break;
         }
 
         case CardId::BEAM_CELL:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
-            addToBot(Actions::DebuffEnemy<MS::VULNERABLE>(t, up ? 3 : 2, false));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
+            Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, up ? 3 : 2, false);
             break;
 
         case CardId::BULLSEYE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 11 : 8)));
-            addToBot(Actions::DebuffEnemy<MS::LOCK_ON>(t, up ? 3 : 2, false));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 11 : 8));
+            Actions::DebuffEnemy<MS::LOCK_ON>(*this, t, up ? 3 : 2, false);
             break;
 
         case CardId::BALL_LIGHTNING:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
-            addToBot(Actions::ChannelOrb(Orb::LIGHTNING));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
+            Actions::ChannelOrb(*this, Orb::LIGHTNING);
             break;
 
         case CardId::BITE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 8 : 7)) );
-            addToBot( Actions::HealPlayer(up ? 3 : 2) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 8 : 7));
+            Actions::HealPlayer(*this, up ? 3 : 2);
             break;
 
         case CardId::BODY_SLAM:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, player.block)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, player.block));
             break;
 
         case CardId::BLOOD_FOR_BLOOD:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 22 : 18)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 22 : 18));
             break;
 
         case CardId::BLUDGEON:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 42 : 32)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 42 : 32));
             break;
 
         case CardId::BLIZZARD:
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 3 : 2) * player.frostOrbsChanneled)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 3 : 2) * player.frostOrbsChanneled));
             break;
 
         case CardId::CARNAGE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 28 : 20)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 28 : 20));
             break;
 
         case CardId::CHOKE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 15 : 12)));
-            addToBot(Actions::BuffEnemy<MS::CHOKED>(t, up ? 5 : 3));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 15 : 12));
+            Actions::BuffEnemy<MS::CHOKED>(*this, t, up ? 5 : 3);
             break;
 
         case CardId::CLASH:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 18 : 14)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 18 : 14));
             break;
 
         case CardId::CLEAVE:  {
             int baseDamage = (up ? 11 : 8) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::AttackAllEnemy(baseDamage) );
+            Actions::AttackAllEnemy(*this, baseDamage);
             break;
         }
 
         case CardId::CLOTHESLINE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 14 : 12)) );
-            addToBot( Actions::DebuffEnemy<MS::WEAK>(t, up ? 3 : 2, false) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 14 : 12));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 3 : 2, false);
             break;
 
         case CardId::CUT_THROUGH_FATE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
-            addToBot(Actions::DrawCards(1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
+            Actions::DrawCards(*this, 1);
             break;
 
         case CardId::CRUSH_JOINTS:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 8)));
-            if (player.skillsPlayedThisTurn > 0) addToBot(Actions::DebuffEnemy<MS::VULNERABLE>(t, up ? 2 : 1, false));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 8));
+            if (player.skillsPlayedThisTurn > 0) Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, up ? 2 : 1, false);
             break;
 
         case CardId::COLD_SNAP:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 9 : 6)));
-            addToBot(Actions::ChannelOrb(Orb::FROST));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 9 : 6));
+            Actions::ChannelOrb(*this, Orb::FROST);
             break;
 
         case CardId::CLAW: {
             const int increment = up ? 3 : 2;
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, (up ? 5 : 3) + c.specialData)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, (up ? 5 : 3) + c.specialData));
             c.specialData += increment;
             if (item.purgeOnUse) {
                 cards.findAndUpgradeSpecialData(c.uniqueId, increment);
@@ -1142,7 +1039,7 @@ void BattleContext::useAttackCard() {
         }
 
         case CardId::COMPILE_DRIVER: {
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
             bool seen[5]{};
             int distinct = 0;
             for (int i = 0; i < player.orbSlots; ++i) {
@@ -1152,220 +1049,220 @@ void BattleContext::useAttackCard() {
                     ++distinct;
                 }
             }
-            addToBot(Actions::DrawCards(distinct));
+            Actions::DrawCards(*this, distinct);
             break;
         }
 
         case CardId::CORE_SURGE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 15 : 11)));
-            addToBot(Actions::BuffPlayer<PS::ARTIFACT>(1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 15 : 11));
+            Actions::BuffPlayer<PS::ARTIFACT>(*this, 1);
             break;
 
         case CardId::DAGGER_THROW:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 9)));
-            addToBot(Actions::DrawCards(1));
-            addToBot(Actions::DiscardOne());
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 9));
+            Actions::DrawCards(*this, 1);
+            Actions::DiscardOne(*this);
             break;
 
         case CardId::DOOM_AND_GLOOM: {
             const int damage = (up ? 10 : 7) + player.getStatus<PS::VIGOR>();
-            addToBot(Actions::AttackAllEnemy(damage));
-            addToBot(Actions::ChannelOrb(Orb::DARK));
+            Actions::AttackAllEnemy(*this, damage);
+            Actions::ChannelOrb(*this, Orb::DARK);
             break;
         }
 
         case CardId::DRAMATIC_ENTRANCE: {
             int baseDamage = (up ? 12 : 8) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::AttackAllEnemy(baseDamage) );
+            Actions::AttackAllEnemy(*this, baseDamage);
             break;
         }
 
         case CardId::DIE_DIE_DIE: {
             const int baseDamage = (up ? 17 : 13) + player.getStatus<PS::VIGOR>();
-            addToBot(Actions::AttackAllEnemy(baseDamage));
+            Actions::AttackAllEnemy(*this, baseDamage);
             break;
         }
 
         case CardId::DAGGER_SPRAY: {
             const int baseDamage = (up ? 6 : 4) + player.getStatus<PS::VIGOR>();
             for (int i = 0; i < 2; ++i) {
-                addToBot(Actions::AttackAllEnemy(baseDamage));
+                Actions::AttackAllEnemy(*this, baseDamage);
             }
             break;
         }
 
         case CardId::DASH:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 13 : 10)));
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 13 : 10)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 13 : 10));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 13 : 10));
             break;
 
         case CardId::ENDLESS_AGONY:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 6 : 4)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 6 : 4));
             break;
 
         case CardId::EMPTY_FIST:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 14 : 9)));
-            addToBot(Actions::ChangeStance(Stance::NEUTRAL));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 14 : 9));
+            Actions::ChangeStance(*this, Stance::NEUTRAL);
             break;
 
         case CardId::EXPUNGER:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 15 : 9)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 15 : 9));
             break;
 
         case CardId::FLYING_SLEEVES: {
             const int damage = calculateCardDamage(c, t, up ? 6 : 4);
-            addToBot(Actions::AttackEnemy(t, damage));
-            addToBot(Actions::AttackEnemy(t, damage));
+            Actions::AttackEnemy(*this, t, damage);
+            Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::FOLLOW_UP:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 11 : 7)));
-            if (player.cardsPlayedThisTurn > 1) addToBot(Actions::GainEnergy(1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 11 : 7));
+            if (player.cardsPlayedThisTurn > 1) Actions::GainEnergy(*this, 1);
             break;
 
         case CardId::JUST_LUCKY:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 4 : 3)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 4 : 3));
             break;
 
         case CardId::SASH_WHIP: {
             const int damage = calculateCardDamage(c, t, up ? 10 : 8);
-            addToBot(Actions::AttackEnemy(t, damage)); addToBot(Actions::AttackEnemy(t, damage));
-            if (player.attacksPlayedThisTurn > 1) addToBot(Actions::DebuffEnemy<MS::WEAK>(t, up ? 2 : 1, false));
+            Actions::AttackEnemy(*this, t, damage); Actions::AttackEnemy(*this, t, damage);
+            if (player.attacksPlayedThisTurn > 1) Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 2 : 1, false);
             break;
         }
 
         case CardId::SANDS_OF_TIME:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 26 : 20)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 26 : 20));
             break;
 
         case CardId::SIGNATURE_MOVE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 40 : 30)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 40 : 30));
             break;
 
         case CardId::TALK_TO_THE_HAND:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 6 : 5)));
-            addToBot(Actions::BuffEnemy<MS::BLOCK_RETURN>(t, up ? 3 : 2));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 6 : 5));
+            Actions::BuffEnemy<MS::BLOCK_RETURN>(*this, t, up ? 3 : 2);
             break;
 
         case CardId::TANTRUM: {
             const int damage = calculateCardDamage(c, t, up ? 4 : 3);
-            for (int i = 0; i < 3; ++i) addToBot(Actions::AttackEnemy(t, damage));
-            addToBot(Actions::ChangeStance(Stance::WRATH));
+            for (int i = 0; i < 3; ++i) Actions::AttackEnemy(*this, t, damage);
+            Actions::ChangeStance(*this, Stance::WRATH);
             break;
         }
 
         case CardId::WINDMILL_STRIKE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
             break;
 
         case CardId::WALLOP:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 9)));
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 12 : 9)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 9));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 12 : 9));
             break;
 
         case CardId::DROPKICK:
-            addToBot( Actions::DropkickAction(t) );
+            Actions::DropkickAction(*this, t);
             break;
 
         case CardId::FEED:
-            addToBot( Actions::FeedAction(t, calculateCardDamage(c, t, up ? 12 : 10), up) );
+            Actions::FeedAction(*this, t, calculateCardDamage(c, t, up ? 12 : 10), up);
             break;
 
         case CardId::CARVE_REALITY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 10 : 6)));
-            addToBot(Actions::MakeTempCardInHand(CardId::SMITE));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 10 : 6));
+            Actions::MakeTempCardInHand(*this, CardId::SMITE);
             break;
 
         case CardId::LESSON_LEARNED:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 13 : 10)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 13 : 10));
             break;
 
         case CardId::REACH_HEAVEN:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 13 : 10)));
-            addToBot(Actions::MakeTempCardInDrawPile(CardInstance(CardId::THROUGH_VIOLENCE), 1, true));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 13 : 10));
+            Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::THROUGH_VIOLENCE), 1, true);
             break;
 
         case CardId::SMITE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 14 : 12)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 14 : 12));
             break;
 
         case CardId::FEAR_NO_EVIL:
             noteEnemyIntentAccess();
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 11 : 8)));
-            if (monsters.arr[t].isAttacking()) addToBot(Actions::ChangeStance(Stance::CALM));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 11 : 8));
+            if (monsters.arr[t].isAttacking()) Actions::ChangeStance(*this, Stance::CALM);
             break;
 
         case CardId::FLURRY_OF_BLOWS: {
             const int damage = calculateCardDamage(c, t, up ? 6 : 4);
-            addToBot(Actions::AttackEnemy(t, damage));
-            addToBot(Actions::AttackEnemy(t, damage));
+            Actions::AttackEnemy(*this, t, damage);
+            Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::FIEND_FIRE:
-            addToBot( Actions::FiendFireAction(t, calculateCardDamage(c, t, up ? 10 : 7)) );
+            Actions::FiendFireAction(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
             break;
 
         case CardId::FLYING_KNEE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 11 : 8)));
-            addToBot(Actions::BuffPlayer<PS::ENERGIZED>(1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 11 : 8));
+            Actions::BuffPlayer<PS::ENERGIZED>(*this, 1);
             break;
 
         case CardId::HEEL_HOOK:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 8 : 5)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 8 : 5));
             if (monsters.arr[t].hasStatus<MS::WEAK>()) {
-                addToBot(Actions::DrawCards(1));
-                addToBot(Actions::GainEnergy(1));
+                Actions::DrawCards(*this, 1);
+                Actions::GainEnergy(*this, 1);
             }
             break;
 
         case CardId::FLASH_OF_STEEL:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 6 : 3)) );
-            addToBot( Actions::DrawCards(1) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 6 : 3));
+            Actions::DrawCards(*this, 1);
             break;
 
         case CardId::HAND_OF_GREED:
-            addToBot( Actions::HandOfGreedAction(t, calculateCardDamage(c, t, up ? 25 : 20), up) );
+            Actions::HandOfGreedAction(*this, t, calculateCardDamage(c, t, up ? 25 : 20), up);
             break;
 
         case CardId::HEADBUTT:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 9)) );
-            addToBot( Actions::HeadbuttAction() );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 9));
+            Actions::HeadbuttAction(*this);
             break;
 
         case CardId::HEAVY_BLADE: {
             const int dmg1 = 14 + ((up ? 4 : 2) * player.getStatus<PS::STRENGTH>());
             const int dmg2 = calculateCardDamage(c, t, dmg1);
-            addToBot( Actions::AttackEnemy(t, dmg2) );
+            Actions::AttackEnemy(*this, t, dmg2);
             break;
         }
 
         case CardId::HEMOKINESIS:
             //  attack enemy should recalculate damage, because we can lose hp and therefore gain strength before the dmg, need to test
            // actually no i dont think that is true ^^
-            addToBot( Actions::PlayerLoseHp(2, true) );
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 20 : 15)) );
+            Actions::PlayerLoseHp(*this, 2, true);
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 20 : 15));
             break;
 
         case CardId::IMMOLATE: {
             int baseDamage = (up ? 28 : 21) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::AttackAllEnemy(baseDamage) );
-            addToBot( Actions::MakeTempCardInDiscard({CardId::BURN}, 1) );
+            Actions::AttackAllEnemy(*this, baseDamage);
+            Actions::MakeTempCardInDiscard(*this, {CardId::BURN}, 1);
             break;
         }
 
         case CardId::HYPERBEAM: {
             const int damage = (up ? 34 : 26) + player.getStatus<PS::VIGOR>();
-            addToBot(Actions::AttackAllEnemy(damage));
-            addToBot(Actions::DebuffPlayer<PS::FOCUS>(-3, false));
+            Actions::AttackAllEnemy(*this, damage);
+            Actions::DebuffPlayer<PS::FOCUS>(*this, -3, false);
             break;
         }
 
         case CardId::FINISHER: {
             const int damage = calculateCardDamage(c, t, up ? 8 : 6);
             for (int i = 0; i < player.attacksPlayedThisTurn; ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
@@ -1377,117 +1274,117 @@ void BattleContext::useAttackCard() {
             }
             const int damage = calculateCardDamage(c, t, up ? 4 : 3);
             for (int i = 0; i < skillCount; ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
 
         case CardId::GLASS_KNIFE: {
             const int damage = calculateCardDamage(c, t, up ? 12 : 8);
-            addToBot(Actions::AttackEnemy(t, damage));
-            addToBot(Actions::AttackEnemy(t, damage));
+            Actions::AttackEnemy(*this, t, damage);
+            Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::FTL:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 4 : 3)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 4 : 3));
             if (player.cardsPlayedThisTurn <= 3) {
-                addToBot(Actions::DrawCards(1));
+                Actions::DrawCards(*this, 1);
             }
             break;
 
         case CardId::GO_FOR_THE_EYES:
             noteEnemyIntentAccess();
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 4 : 3)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 4 : 3));
             if (monsters.arr[t].isAttacking()) {
-                addToBot(Actions::DebuffEnemy<MS::WEAK>(t, 1, false));
+                Actions::DebuffEnemy<MS::WEAK>(*this, t, 1, false);
             }
             break;
 
         case CardId::ERUPTION:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 9)));
-            addToBot(Actions::ChangeStance(Stance::WRATH));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 9));
+            Actions::ChangeStance(*this, Stance::WRATH);
             break;
 
         case CardId::EVISCERATE:
             for (int i = 0; i < 3; ++i) {
-                addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 9 : 7)));
+                Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 9 : 7));
             }
             break;
 
         case CardId::IRON_WAVE: {
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 7 : 5)) );
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 7 : 5)) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 7 : 5));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 7 : 5));
             break;
         }
 
         case CardId::MIND_BLAST: {
             const auto damage = calculateCardDamage(c, t, static_cast<int>(cards.drawPile.size()));
-            addToBot( Actions::AttackEnemy(t, damage) );
+            Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::MELTER: {
             const int multiplier = monsters.arr[t].block > 0 ? 3 : 1;
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, (up ? 14 : 10) * multiplier)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, (up ? 14 : 10) * multiplier));
             break;
         }
 
         case CardId::METEOR_STRIKE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 28 : 24)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 28 : 24));
             for (int i = 0; i < 3; ++i) {
-                addToBot(Actions::ChannelOrb(Orb::FUSION));
+                Actions::ChannelOrb(*this, Orb::FUSION);
             }
             break;
 
         case CardId::NEUTRALIZE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 4 : 3)));
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(t, up ? 2 : 1, false));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 4 : 3));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 2 : 1, false);
             break;
 
         case CardId::PERFECTED_STRIKE: {
             // hack because we calculate strikeCount while non purge cards are still in hand.
             const int strikeDmg = cards.strikeCount * (up ? 3 : 2);
             const int baseDamage = 6 + strikeDmg;
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, baseDamage)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, baseDamage));
             break;
         }
 
         case CardId::POISONED_STAB:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 8 : 6)));
-            addToBot(Actions::DebuffEnemy<MS::POISON>(t, up ? 4 : 3));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 8 : 6));
+            Actions::DebuffEnemy<MS::POISON>(*this, t, up ? 4 : 3);
             break;
 
         case CardId::POMMEL_STRIKE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 9)) );
-            addToBot( Actions::DrawCards(up  ? 2 : 1) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 9));
+            Actions::DrawCards(*this, up  ? 2 : 1);
             break;
 
         case CardId::PUMMEL: {
             const auto attackCount = up ? 5 : 4;
             const auto damage = calculateCardDamage(c, t, 2);
             for (int i = 0; i < attackCount; ++i) {
-                addToBot( Actions::AttackEnemy(t, damage) );
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
 
         case CardId::QUICK_SLASH:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 8)));
-            addToBot(Actions::DrawCards(1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 8));
+            Actions::DrawCards(*this, 1);
             break;
 
         case CardId::RIP_AND_TEAR: {
             const int damage = calculateCardDamage(c, t, up ? 9 : 7);
-            addToBot(Actions::AttackEnemy(t, damage));
-            addToBot(Actions::AttackEnemy(t, damage));
+            Actions::AttackEnemy(*this, t, damage);
+            Actions::AttackEnemy(*this, t, damage);
             break;
         }
 
         case CardId::RIDDLE_WITH_HOLES: {
             const int damage = calculateCardDamage(c, t, up ? 4 : 3);
             for (int i = 0; i < 5; ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
@@ -1497,14 +1394,14 @@ void BattleContext::useAttackCard() {
             player.useEnergy(energy);
             const int damage = calculateCardDamage(c, t, up ? 8 : 7);
             for (int i = 0; i < energy; ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
 
         case CardId::RAMPAGE: { // todo doubled card damage is changed by the first
             const int damage = calculateCardDamage(c, t, 8+c.specialData);
-            addToBot( Actions::AttackEnemy(t, damage) );
+            Actions::AttackEnemy(*this, t, damage);
 
             if (item.purgeOnUse) {
                 cards.findAndUpgradeSpecialData(c.uniqueId, up ? 8 : 5);
@@ -1516,85 +1413,85 @@ void BattleContext::useAttackCard() {
 
         case CardId::REAPER: {
             const auto baseDamage = (up ? 5 : 4) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::ReaperAction(baseDamage) );
+            Actions::ReaperAction(*this, baseDamage);
             break;
         }
 
         case CardId::RECKLESS_CHARGE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)) );
-            addToBot( Actions::MakeTempCardInDrawPile({CardId::DAZED}, 1, true) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
+            Actions::MakeTempCardInDrawPile(*this, {CardId::DAZED}, 1, true);
             break;
 
         case CardId::RITUAL_DAGGER:
-            addToBot( Actions::RitualDaggerAction(t, calculateCardDamage(c, t, c.specialData)) );
+            Actions::RitualDaggerAction(*this, t, calculateCardDamage(c, t, c.specialData));
             break;
 
         case CardId::RAGNAROK: {
             const int damage = calculateCardDamage(c, t, up ? 6 : 5);
             for (int i = 0; i < (up ? 6 : 5); ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
 
         case CardId::GRAND_FINALE:
-            addToBot(Actions::AttackAllEnemy((up ? 60 : 50) + player.getStatus<PS::VIGOR>()));
+            Actions::AttackAllEnemy(*this, (up ? 60 : 50) + player.getStatus<PS::VIGOR>());
             break;
 
         case CardId::SEARING_BLOW: {
             const int n = c.getUpgradeCount();
             const int baseDmg = n * (n+7) / 2 + 12;
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, baseDmg)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, baseDmg));
             break;
         }
 
         case CardId::SCRAPE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)));
-            addToBot(Actions::ScrapeAction(up ? 5 : 4));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
+            Actions::ScrapeAction(*this, up ? 5 : 4);
             break;
 
         case CardId::SEVER_SOUL: // another example of damage being calculated after an action, maybe need a new action to calculate damage later...
-            addToBot( Actions::SeverSoulExhaustAction() );
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 22 : 16)) );
+            Actions::SeverSoulExhaustAction(*this);
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 22 : 16));
             break;
 
         case CardId::SHIV:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 6 : 4)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 6 : 4));
             break;
 
         case CardId::SLICE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 9 : 6)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 9 : 6));
             break;
 
         case CardId::SWIFT_STRIKE:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 10 : 7)) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 10 : 7));
             break;
 
         case CardId::WEAVE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 6 : 4)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 6 : 4));
             break;
 
         case CardId::WHEEL_KICK:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 20 : 15)));
-            addToBot(Actions::DrawCards(2));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 20 : 15));
+            Actions::DrawCards(*this, 2);
             break;
 
         case CardId::SNEAKY_STRIKE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 16 : 12)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 16 : 12));
             break;
 
         case CardId::STREAMLINE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 20 : 15)));
-            addToBot(Actions::ModifyCurrentCardCost(-1));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 20 : 15));
+            Actions::ModifyCurrentCardCost(*this, -1);
             break;
 
         case CardId::PREDATOR:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 20 : 15)));
-            addToBot(Actions::BuffPlayer<PS::DRAW_CARD_NEXT_TURN>(up ? 3 : 2));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 20 : 15));
+            Actions::BuffPlayer<PS::DRAW_CARD_NEXT_TURN>(*this, up ? 3 : 2);
             break;
 
         case CardId::UNLOAD:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 18 : 14)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 18 : 14));
             for (int i = cards.cardsInHand - 1; i >= 0; --i) {
                 const auto card = cards.hand[i];
                 if (card.getType() != CardType::ATTACK) {
@@ -1606,64 +1503,64 @@ void BattleContext::useAttackCard() {
             break;
 
         case CardId::SUNDER:
-            addToBot(Actions::SunderAction(t, calculateCardDamage(c, t, up ? 32 : 24)));
+            Actions::SunderAction(*this, t, calculateCardDamage(c, t, up ? 32 : 24));
             break;
 
         case CardId::SWEEPING_BEAM: {
             const int damage = (up ? 9 : 6) + player.getStatus<PS::VIGOR>();
-            addToBot(Actions::AttackAllEnemy(damage));
-            addToBot(Actions::DrawCards(1));
+            Actions::AttackAllEnemy(*this, damage);
+            Actions::DrawCards(*this, 1);
             break;
         }
 
         case CardId::REBOUND:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 12 : 9)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 12 : 9));
             // The end-of-card hook advances this from 2 to 1; the next
             // playable card then returns to the top of the draw pile.
-            addToBot(Actions::BuffPlayer<PS::REBOUND>(2));
+            Actions::BuffPlayer<PS::REBOUND>(*this, 2);
             break;
 
         case CardId::SUCKER_PUNCH:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 9 : 7)));
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(t, up ? 2 : 1, false));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 9 : 7));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 2 : 1, false);
             break;
 
         case CardId::SWORD_BOOMERANG:
             for (int i = 0; i < (up ? 4 : 3); ++i) {
-                addToBot(Actions::SwordBoomerangAction(3+player.getStatus<PS::VIGOR>())); // vigor is removed afterwards so this is a necessary (maybe not 100% accurate) hack
+                Actions::SwordBoomerangAction(*this, 3+player.getStatus<PS::VIGOR>()); // vigor is removed afterwards so this is a necessary (maybe not 100% accurate) hack
             }
             break;
 
         case CardId::THUNDERCLAP: {
             int baseDamage = (up ? 7 : 4) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::AttackAllEnemy(baseDamage));
-            addToBot( Actions::DebuffAllEnemy<MS::VULNERABLE>(1, false) );
+            Actions::AttackAllEnemy(*this, baseDamage);
+            Actions::DebuffAllEnemy<MS::VULNERABLE>(*this, 1, false);
             break;
         }
 
         case CardId::THROUGH_VIOLENCE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 30 : 20)));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 30 : 20));
             break;
 
         case CardId::THUNDER_STRIKE: {
             const int damage = calculateCardDamage(c, t, up ? 9 : 7);
             for (int i = 0; i < player.lightningOrbsChanneled; ++i) {
-                addToBot(Actions::AttackEnemy(t, damage));
+                Actions::AttackEnemy(*this, t, damage);
             }
             break;
         }
 
         case CardId::TWIN_STRIKE: { // todo test with breaking block on first hit and drill relic
             const int dmg = calculateCardDamage(c, t, up ? 7 : 5);
-            addToBot(Actions::AttackEnemy(t, dmg));
-            addToBot(Actions::AttackEnemy(t, dmg));
+            Actions::AttackEnemy(*this, t, dmg);
+            Actions::AttackEnemy(*this, t, dmg);
             break;
         }
 
         case CardId::UPPERCUT:
-            addToBot( Actions::AttackEnemy(t, calculateCardDamage(c, t, 13)) );
-            addToBot( Actions::DebuffEnemy<MS::WEAK>(t, up ? 2 : 1, false) );
-            addToBot( Actions::DebuffEnemy<MS::VULNERABLE>(t, up ? 2 : 1, false) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, 13));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 2 : 1, false);
+            Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, up ? 2 : 1, false);
             break;
 
         case CardId::WHIRLWIND: {
@@ -1671,20 +1568,20 @@ void BattleContext::useAttackCard() {
                 item.energyOnUse = player.energy;
             }
             const auto baseDamage = (up ? 8 : 5) + player.getStatus<PS::VIGOR>();
-            addToBot( Actions::WhirlwindAction(baseDamage, item.energyOnUse, !(item.freeToPlay || c.freeToPlayOnce)));
+            Actions::WhirlwindAction(*this, baseDamage, item.energyOnUse, !(item.freeToPlay || c.freeToPlayOnce));
             break;
         }
 
         case CardId::WILD_STRIKE:
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t, up ? 17 : 12)));
-            addToBot( Actions::MakeTempCardInDrawPile( CardInstance(CardId::WOUND), 1, true) );
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t, up ? 17 : 12));
+            Actions::MakeTempCardInDrawPile(*this,  CardInstance(CardId::WOUND), 1, true);
             break;
 
         case CardId::BRILLIANCE:
             // Brilliance reads the current Mantra total when played; it does not
             // permanently modify the card's base damage.
-            addToBot(Actions::AttackEnemy(t, calculateCardDamage(c, t,
-                (up ? 16 : 12) + player.getStatus<PS::MANTRA>())));
+            Actions::AttackEnemy(*this, t, calculateCardDamage(c, t,
+                (up ? 16 : 12) + player.getStatus<PS::MANTRA>()));
             break;
 
 
@@ -1701,7 +1598,7 @@ void BattleContext::useAttackCard() {
 
 // todo a lot of things can be done immediately
 void BattleContext::useSkillCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
     const auto t = item.target;
     const bool up = c.isUpgraded();
@@ -1711,135 +1608,142 @@ void BattleContext::useSkillCard() {
         case CardId::DEFEND_BLUE:
         case CardId::DEFEND_GREEN:
         case CardId::DEFEND_PURPLE:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 8 : 5)) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 8 : 5));
             break;
 
         case CardId::ARMAMENTS:
-            addToBot(Actions::GainBlock(calculateCardBlock(5)) );
+            Actions::GainBlock(*this, calculateCardBlock(5));
             if (up) {
-                addToBot(Actions::UpgradeAllCardsInHand());
+                Actions::UpgradeAllCardsInHand(*this);
             } else {
-                addToBot(Actions::ArmamentsAction());
+                Actions::ArmamentsAction(*this);
             }
             break;
 
         case CardId::APOTHEOSIS:
-            addToBot( Actions::ApotheosisAction() );
+            Actions::ApotheosisAction(*this);
             break;
 
         case CardId::AMPLIFY:
-            addToBot(Actions::BuffPlayer<PS::AMPLIFY>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::AMPLIFY>(*this, up ? 2 : 1);
             break;
 
         case CardId::AGGREGATE:
-            addToBot(Actions::GainEnergy(static_cast<int>(cards.drawPile.size()) / (up ? 3 : 4)));
+            Actions::GainEnergy(*this, static_cast<int>(cards.drawPile.size()) / (up ? 3 : 4));
             break;
 
         case CardId::AUTO_SHIELDS:
             if (player.block == 0) {
-                addToBot(Actions::GainBlock(calculateCardBlock(up ? 15 : 11)));
+                Actions::GainBlock(*this, calculateCardBlock(up ? 15 : 11));
             }
             break;
 
         case CardId::APPARITION:
-            addToBot( Actions::BuffPlayer<PS::INTANGIBLE>(1) );
+            Actions::BuffPlayer<PS::INTANGIBLE>(*this, 1);
             break;
 
         case CardId::BANDAGE_UP:
-            addToBot( Actions::HealPlayer(up ? 6 : 4) );
+            Actions::HealPlayer(*this, up ? 6 : 4);
             break;
 
         case CardId::BATTLE_TRANCE:
-            addToBot( Actions::DrawCards(up ? 4 : 3) );
-            addToBot( Actions::DebuffPlayer<PS::NO_DRAW>() );
+            Actions::DrawCards(*this, up ? 4 : 3);
+            Actions::DebuffPlayer<PS::NO_DRAW>(*this);
             break;
 
         case CardId::CRESCENDO:
-            addToBot(Actions::ChangeStance(Stance::WRATH));
+            Actions::ChangeStance(*this, Stance::WRATH);
             break;
 
         case CardId::ALPHA:
-            addToBot(Actions::MakeTempCardInDrawPile(CardInstance(CardId::BETA), 1, true));
+            Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::BETA), 1, true);
             break;
 
         case CardId::BETA:
-            addToBot(Actions::BuffPlayer<PS::OMEGA>(50));
+            Actions::BuffPlayer<PS::OMEGA>(*this, 50);
             break;
 
         case CardId::BLASPHEMY:
-            addToBot(Actions::ChangeStance(Stance::DIVINITY));
-            addToBot(Actions::BuffPlayer<PS::BLASPHEMER>(1));
+            Actions::ChangeStance(*this, Stance::DIVINITY);
+            Actions::BuffPlayer<PS::BLASPHEMER>(*this, 1);
             break;
 
         case CardId::CONJURE_BLADE: {
             const int energy = std::min(item.energyOnUse, player.energy);
             player.useEnergy(energy);
-            for (int i = 0; i < energy; ++i) addToBot(Actions::MakeTempCardInHand(CardId::EXPUNGER, up));
+            for (int i = 0; i < energy; ++i) Actions::MakeTempCardInHand(*this, CardId::EXPUNGER, up);
             break;
         }
 
         case CardId::FOREIGN_INFLUENCE:
-            addToBot(Actions::MakeRandomCardInHand(CardType::ATTACK, 1, true));
+            Actions::MakeRandomCardInHand(*this, CardType::ATTACK, 1, true);
             break;
 
         case CardId::INDIGNATION:
-            addToBot(Actions::BuffPlayer<PS::MANTRA>(up ? 3 : 2));
+            Actions::BuffPlayer<PS::MANTRA>(*this, up ? 3 : 2);
             break;
 
         case CardId::PRESSURE_POINTS:
-            addToBot(Actions::BuffEnemy<MS::MARK>(t, up ? 11 : 8));
+            Actions::BuffEnemy<MS::MARK>(*this, t, up ? 11 : 8);
             break;
 
         case CardId::JUDGMENT:
-            addToBot(Actions::Judgment(t, up ? 40 : 30));
+            {
+                auto &monster = monsters.arr[t];
+                if (!monster.isDeadOrEscaped() && monster.curHp <= (up ? 40 : 30)) {
+                    monster.curHp = 0;
+                    monster.die(*this);
+                    checkCombat();
+                }
+            }
             break;
 
         case CardId::CARVE_REALITY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 10 : 6)));
-            addToBot(Actions::MakeTempCardInHand(CardId::SMITE));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 10 : 6));
+            Actions::MakeTempCardInHand(*this, CardId::SMITE);
             break;
 
         case CardId::COLLECT: {
             const int energy = std::min(item.energyOnUse, player.energy);
             player.useEnergy(energy);
-            addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE, false, energy));
+            Actions::MakeTempCardInHand(*this, CardId::MIRACLE, false, energy);
             break;
         }
 
         case CardId::EMPTY_MIND:
-            addToBot(Actions::ChangeStance(Stance::CALM));
-            addToBot(Actions::DrawCards(2));
+            Actions::ChangeStance(*this, Stance::CALM);
+            Actions::DrawCards(*this, 2);
             break;
 
         case CardId::EVALUATE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 10 : 6)));
-            addToBot(Actions::MakeTempCardInHand(CardId::INSIGHT));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 10 : 6));
+            Actions::MakeTempCardInHand(*this, CardId::INSIGHT);
             break;
 
         case CardId::DEUS_EX_MACHINA:
-            addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE, false, up ? 3 : 2));
+            Actions::MakeTempCardInHand(*this, CardId::MIRACLE, false, up ? 3 : 2);
             break;
 
         case CardId::INSIGHT:
-            addToBot(Actions::DrawCards(2));
+            Actions::DrawCards(*this, 2);
             break;
 
         case CardId::EMPTY_BODY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 11 : 7)));
-            addToBot(Actions::ChangeStance(Stance::NEUTRAL));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 11 : 7));
+            Actions::ChangeStance(*this, Stance::NEUTRAL);
             break;
 
         case CardId::HALT:
-            addToBot(Actions::GainBlock(calculateCardBlock(player.stance == Stance::CALM ? (up ? 18 : 14) : (up ? 12 : 9))));
+            Actions::GainBlock(*this, calculateCardBlock(player.stance == Stance::CALM ? (up ? 18 : 14) : (up ? 12 : 9)));
             break;
 
         case CardId::INNER_PEACE:
-            if (player.stance == Stance::CALM) addToBot(Actions::DrawCards(up ? 4 : 3));
-            else addToBot(Actions::ChangeStance(Stance::CALM));
+            if (player.stance == Stance::CALM) Actions::DrawCards(*this, up ? 4 : 3);
+            else Actions::ChangeStance(*this, Stance::CALM);
             break;
 
         case CardId::MEDITATE:
-            addToBot(Actions::ChangeStance(Stance::CALM));
+            Actions::ChangeStance(*this, Stance::CALM);
             break;
 
         case CardId::OMNISCIENCE:
@@ -1849,60 +1753,60 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::PERSEVERANCE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 12 : 7)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 12 : 7));
             break;
 
         case CardId::PRAY:
-            addToBot(Actions::BuffPlayer<PS::MANTRA>(up ? 4 : 3));
-            addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE));
+            Actions::BuffPlayer<PS::MANTRA>(*this, up ? 4 : 3);
+            Actions::MakeTempCardInHand(*this, CardId::MIRACLE);
             break;
 
         case CardId::REACH_HEAVEN:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 13 : 10)));
-            addToBot(Actions::MakeTempCardInDrawPile(CardInstance(CardId::THROUGH_VIOLENCE), 1, true));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 13 : 10));
+            Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::THROUGH_VIOLENCE), 1, true);
             break;
 
         case CardId::SIMMERING_FURY:
-            addToBot(Actions::ChangeStance(Stance::WRATH));
-            addToBot(Actions::DrawCards(up ? 3 : 2));
+            Actions::ChangeStance(*this, Stance::WRATH);
+            Actions::DrawCards(*this, up ? 3 : 2);
             break;
 
         case CardId::SWIVEL:
-            addToBot(Actions::BuffPlayer<PS::VIGOR>(up ? 10 : 8));
+            Actions::BuffPlayer<PS::VIGOR>(*this, up ? 10 : 8);
             break;
 
         case CardId::PROTECT:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 16 : 12)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 16 : 12));
             break;
 
         case CardId::PROSTRATE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 6 : 4)));
-            addToBot(Actions::BuffPlayer<PS::MANTRA>(up ? 3 : 2));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 6 : 4));
+            Actions::BuffPlayer<PS::MANTRA>(*this, up ? 3 : 2);
             break;
 
         case CardId::SANCTITY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 9 : 6)));
-            if (player.stance == Stance::CALM) addToBot(Actions::DrawCards(2));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 9 : 6));
+            if (player.stance == Stance::CALM) Actions::DrawCards(*this, 2);
             break;
 
         case CardId::SAFETY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 16 : 12)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 16 : 12));
             break;
 
         case CardId::SPIRIT_SHIELD:
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 4 : 3) * cards.cardsInHand)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 4 : 3) * cards.cardsInHand));
             break;
 
         case CardId::THIRD_EYE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 9 : 7)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 9 : 7));
             break;
 
         case CardId::TRANQUILITY:
-            addToBot(Actions::ChangeStance(Stance::CALM));
+            Actions::ChangeStance(*this, Stance::CALM);
             break;
 
         case CardId::WORSHIP:
-            addToBot(Actions::BuffPlayer<PS::MANTRA>(up ? 6 : 5));
+            Actions::BuffPlayer<PS::MANTRA>(*this, up ? 6 : 5);
             break;
 
         case CardId::VAULT:
@@ -1911,11 +1815,11 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::WAVE_OF_THE_HAND:
-            addToBot(Actions::BuffPlayer<PS::WAVE_OF_THE_HAND>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::WAVE_OF_THE_HAND>(*this, up ? 2 : 1);
             break;
 
         case CardId::WREATH_OF_FLAME:
-            addToBot(Actions::BuffPlayer<PS::VIGOR>(up ? 8 : 5));
+            Actions::BuffPlayer<PS::VIGOR>(*this, up ? 8 : 5);
             break;
 
         case CardId::WISH:
@@ -1923,28 +1827,28 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::BULLET_TIME:
-            addToBot(Actions::BulletTimeAction());
+            Actions::BulletTimeAction(*this);
             break;
 
         case CardId::DOPPELGANGER: {
             const int energy = std::min(item.energyOnUse, player.energy);
             player.useEnergy(energy);
-            addToBot(Actions::BuffPlayer<PS::ENERGIZED>(energy));
-            addToBot(Actions::BuffPlayer<PS::DRAW_CARD_NEXT_TURN>(energy));
+            Actions::BuffPlayer<PS::ENERGIZED>(*this, energy);
+            Actions::BuffPlayer<PS::DRAW_CARD_NEXT_TURN>(*this, energy);
             break;
         }
 
         case CardId::BLIZZARD:
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 3 : 2) * player.frostOrbsChanneled)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 3 : 2) * player.frostOrbsChanneled));
             break;
 
         case CardId::BOOT_SEQUENCE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 13 : 10)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 13 : 10));
             break;
 
         case CardId::ADRENALINE:
-            addToBot(Actions::DrawCards(up ? 3 : 2));
-            addToBot(Actions::GainEnergy(1));
+            Actions::DrawCards(*this, up ? 3 : 2);
+            Actions::GainEnergy(*this, 1);
             break;
 
         case CardId::ALCHEMIZE:
@@ -1952,61 +1856,61 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::OUTMANEUVER:
-            addToBot(Actions::BuffPlayer<PS::ENERGIZED>(up ? 4 : 3));
+            Actions::BuffPlayer<PS::ENERGIZED>(*this, up ? 4 : 3);
             break;
 
         case CardId::PIERCING_WAIL:
-            addToBot(Actions::DebuffAllEnemy<MS::STRENGTH>(-(up ? 8 : 6), false));
+            Actions::DebuffAllEnemy<MS::STRENGTH>(*this, -(up ? 8 : 6), false);
             break;
 
         case CardId::ACROBATICS:
-            addToBot(Actions::DrawCards(up ? 4 : 3));
-            addToBot(Actions::DiscardOne());
+            Actions::DrawCards(*this, up ? 4 : 3);
+            Actions::DiscardOne(*this);
             break;
 
         case CardId::BACKFLIP:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 8 : 5)));
-            addToBot(Actions::DrawCards(2));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 8 : 5));
+            Actions::DrawCards(*this, 2);
             break;
 
         case CardId::BOUNCING_FLASK:
-            addToBot(Actions::BouncingFlaskAction(up ? 4 : 3));
+            Actions::BouncingFlaskAction(*this, up ? 4 : 3);
             break;
 
         case CardId::CALCULATED_GAMBLE:
-            addToBot(Actions::CalculatedGambleAction());
+            Actions::CalculatedGambleAction(*this);
             break;
 
         case CardId::BLADE_DANCE:
-            addToBot(Actions::MakeTempCardInHand(CardId::SHIV, false, up ? 4 : 3));
+            Actions::MakeTempCardInHand(*this, CardId::SHIV, false, up ? 4 : 3);
             break;
 
         case CardId::BLUR:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 8 : 5)));
-            addToBot(Actions::BuffPlayer<PS::BLUR>());
+            Actions::GainBlock(*this, calculateCardBlock(up ? 8 : 5));
+            Actions::BuffPlayer<PS::BLUR>(*this);
             break;
 
         case CardId::BLIND:
             if (up) {
-                addToBot( Actions::DebuffAllEnemy<MS::WEAK>(2, false) );
+                Actions::DebuffAllEnemy<MS::WEAK>(*this, 2, false);
             } else {
-                addToBot( Actions::DebuffEnemy<MS::WEAK>(t, 2, false) );
+                Actions::DebuffEnemy<MS::WEAK>(*this, t, 2, false);
             }
             break;
 
         case CardId::BLOODLETTING:
-            addToBot( Actions::PlayerLoseHp(3, true) );
-            addToBot( Actions::GainEnergy(up ? 3 : 2) );
+            Actions::PlayerLoseHp(*this, 3, true);
+            Actions::GainEnergy(*this, up ? 3 : 2);
             break;
 
         case CardId::BURNING_PACT:
-            addToBot( Actions::ChooseExhaustOne() );
-            addToBot( Actions::DrawCards(up ? 3 : 2) );
+            Actions::ChooseExhaustOne(*this);
+            drawAfterChoice(up ? 3 : 2);
             break;
 
         case CardId::CHILL:
             for (int i = 0; i < (up ? 2 : 1); ++i) {
-                addToBot(Actions::ChannelOrb(Orb::FROST));
+                Actions::ChannelOrb(*this, Orb::FROST);
             }
             break;
 
@@ -2016,7 +1920,7 @@ void BattleContext::useSkillCard() {
                 player.orbs[player.orbSlots] = Orb::EMPTY;
                 player.orbData[player.orbSlots] = 0;
             }
-            addToBot(Actions::BuffPlayer<PS::FOCUS>(up ? 3 : 2));
+            Actions::BuffPlayer<PS::FOCUS>(*this, up ? 3 : 2);
             break;
 
         case CardId::CONCENTRATE:
@@ -2028,151 +1932,156 @@ void BattleContext::useSkillCard() {
                 cards.moveToDiscardPile(card);
                 onManualDiscard(card);
             }
-            addToBot(Actions::GainEnergy(up ? 3 : 2));
+            Actions::GainEnergy(*this, up ? 3 : 2);
             break;
 
         case CardId::CHARGE_BATTERY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 10 : 7)));
-            addToBot(Actions::BuffPlayer<PS::ENERGIZED>(1));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 10 : 7));
+            Actions::BuffPlayer<PS::ENERGIZED>(*this, 1);
             break;
 
         case CardId::CHRYSALIS:
-            addToBot( Actions::PutRandomCardsInDrawPile(CardType::SKILL, up ? 5 : 3) );
+            Actions::PutRandomCardsInDrawPile(*this, CardType::SKILL, up ? 5 : 3);
             break;
 
         case CardId::DARK_SHACKLES:
-            addToBot( Actions::DebuffEnemy<MS::STRENGTH>(t, up ? 15 : 9) );
+            Actions::DebuffEnemy<MS::STRENGTH>(*this, t, up ? 15 : 9);
             if (monsters.arr[t].hasStatus<MS::ARTIFACT>()) {
-                addToBot( Actions::BuffEnemy<MS::SHACKLED>(t, up ? 15 : 9) );
+                Actions::BuffEnemy<MS::SHACKLED>(*this, t, up ? 15 : 9);
             }
             break;
 
         case CardId::DARKNESS:
-            addToBot(Actions::ChannelOrb(Orb::DARK));
+            Actions::ChannelOrb(*this, Orb::DARK);
             break;
 
         case CardId::CLOAK_AND_DAGGER:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 8 : 6)));
-            addToBot(Actions::MakeTempCardInHand(CardId::SHIV, false, up ? 2 : 1));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 8 : 6));
+            Actions::MakeTempCardInHand(*this, CardId::SHIV, false, up ? 2 : 1);
             break;
 
         case CardId::ESCAPE_PLAN:
-            addToBot(Actions::EscapePlanAction(up ? 5 : 3));
+            Actions::EscapePlanAction(*this, up ? 5 : 3);
             break;
 
         case CardId::COOLHEADED:
-            addToBot(Actions::ChannelOrb(Orb::FROST));
-            addToBot(Actions::DrawCards(up ? 2 : 1));
+            Actions::ChannelOrb(*this, Orb::FROST);
+            Actions::DrawCards(*this, up ? 2 : 1);
             break;
 
         case CardId::CHAOS:
             for (int i = 0; i < (up ? 2 : 1); ++i) {
-                addToBot(Actions::ChannelOrb(static_cast<Orb>(1 + cardRandomRng.random(3))));
+                Actions::ChannelOrb(*this, static_cast<Orb>(1 + cardRandomRng.random(3)));
             }
             break;
 
         case CardId::EQUILIBRIUM:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 16 : 13)));
-            addToBot(Actions::BuffPlayer<PS::EQUILIBRIUM>(1));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 16 : 13));
+            Actions::BuffPlayer<PS::EQUILIBRIUM>(*this, 1);
             break;
 
         case CardId::DEADLY_POISON:
-            addToBot(Actions::DebuffEnemy<MS::POISON>(t, up ? 7 : 5));
+            Actions::DebuffEnemy<MS::POISON>(*this, t, up ? 7 : 5);
             break;
 
         case CardId::CRIPPLING_CLOUD:
-            addToBot(Actions::DebuffAllEnemy<MS::WEAK>(up ? 3 : 2, false));
-            addToBot(Actions::DebuffAllEnemy<MS::POISON>(up ? 7 : 4));
+            Actions::DebuffAllEnemy<MS::WEAK>(*this, up ? 3 : 2, false);
+            Actions::DebuffAllEnemy<MS::POISON>(*this, up ? 7 : 4);
             break;
 
         case CardId::CATALYST:
-            addToBot(Actions::Catalyst(t, up ? 3 : 2));
+            {
+                auto &monster = monsters.arr[t];
+                if (!monster.isDeadOrEscaped() && monster.hasStatus<MS::POISON>()) {
+                    monster.setStatus<MS::POISON>(monster.getStatus<MS::POISON>() * (up ? 3 : 2));
+                }
+            }
             break;
 
         case CardId::CORPSE_EXPLOSION:
-            addToBot(Actions::DebuffEnemy<MS::POISON>(t, up ? 9 : 6));
-            addToBot(Actions::DebuffEnemy<MS::CORPSE_EXPLOSION>(t, up ? 3 : 2));
+            Actions::DebuffEnemy<MS::POISON>(*this, t, up ? 9 : 6);
+            Actions::DebuffEnemy<MS::CORPSE_EXPLOSION>(*this, t, up ? 3 : 2);
             break;
 
         case CardId::DISTRACTION:
-            addToBot(Actions::MakeRandomCardInHand(CardType::SKILL, 1, true));
+            Actions::MakeRandomCardInHand(*this, CardType::SKILL, 1, true);
             break;
 
         case CardId::DEFLECT:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 7 : 4)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 7 : 4));
             break;
 
         case CardId::DEEP_BREATH:
             if (!cards.discardPile.empty()) {
                 onShuffle();
-                addToBot( Actions::EmptyDeckShuffle() );
-                addToBot( Actions::ShuffleDrawPile() );
+                Actions::EmptyDeckShuffle(*this);
+                Actions::ShuffleDrawPile(*this);
             }
-            addToBot( Actions::DrawCards(up ? 2 : 1) );
+            Actions::DrawCards(*this, up ? 2 : 1);
             break;
 
         case CardId::DECEIVE_REALITY:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 6 : 4)));
-            addToBot(Actions::MakeTempCardInHand(CardId::SAFETY));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 6 : 4));
+            Actions::MakeTempCardInHand(*this, CardId::SAFETY);
             break;
 
         case CardId::DOUBLE_ENERGY:
-            addToBot(Actions::GainEnergy(player.energy));
+            Actions::GainEnergy(*this, player.energy);
             break;
 
         case CardId::DODGE_AND_ROLL:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 6 : 4)));
-            addToBot(Actions::BuffPlayer<PS::NEXT_TURN_BLOCK>(up ? 6 : 4));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 6 : 4));
+            Actions::BuffPlayer<PS::NEXT_TURN_BLOCK>(*this, up ? 6 : 4);
             break;
 
         case CardId::DISARM:
-            addToBot( Actions::DebuffEnemy<MS::STRENGTH>(t, up ? -3 : -2, false) );
+            Actions::DebuffEnemy<MS::STRENGTH>(*this, t, up ? -3 : -2, false);
             break;
 
         case CardId::SURVIVOR:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 11 : 8)));
-            addToBot(Actions::DiscardOne());
+            Actions::GainBlock(*this, calculateCardBlock(up ? 11 : 8));
+            Actions::DiscardOne(*this);
             break;
 
         case CardId::ZAP:
-            addToBot(Actions::ChannelOrb(Orb::LIGHTNING));
+            Actions::ChannelOrb(*this, Orb::LIGHTNING);
             break;
 
         case CardId::DISCOVERY:
             undefinedBehaviorEvoked = true;
-            addToBot(Actions::DiscoveryAction(CardType::INVALID, 1));
+            Actions::DiscoveryAction(*this, CardType::INVALID, 1);
             break;
 
         case CardId::DOUBLE_TAP:
-            addToBot(Actions::BuffPlayer<PS::DOUBLE_TAP>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::DOUBLE_TAP>(*this, up ? 2 : 1);
             break;
 
         case CardId::DUAL_WIELD:
-            addToBot( Actions::DualWieldAction(up ? 2 : 1) );
+            Actions::DualWieldAction(*this, up ? 2 : 1);
             break;
 
         case CardId::DUALCAST:
-            addToBot(Actions::EvokeFrontOrb());
-            addToBot(Actions::EvokeFrontOrb());
+            Actions::EvokeFrontOrb(*this);
+            Actions::EvokeFrontOrb(*this);
             break;
 
         case CardId::ENLIGHTENMENT:
-            addToBot( Actions::EnlightenmentAction(up) );
+            Actions::EnlightenmentAction(*this, up);
             break;
 
         case CardId::ENTRENCH:
-            addToBot(Actions::EntrenchAction());
+            Actions::EntrenchAction(*this);
             break;
 
         case CardId::EXHUME:
-            addToBot( Actions::ExhumeAction() );
+            Actions::ExhumeAction(*this);
             break;
 
         case CardId::MALAISE: {
             const int energy = std::min(item.energyOnUse, player.energy);
             player.useEnergy(energy);
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(t, energy, false));
-            addToBot(Actions::DebuffEnemy<MS::STRENGTH>(t, -energy, false));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, energy, false);
+            Actions::DebuffEnemy<MS::STRENGTH>(*this, t, -energy, false);
             break;
         }
 
@@ -2184,7 +2093,7 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::BURST:
-            addToBot(Actions::BuffPlayer<PS::BURST>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::BURST>(*this, up ? 2 : 1);
             break;
 
         case CardId::TACTICIAN:
@@ -2193,32 +2102,32 @@ void BattleContext::useSkillCard() {
             break;
 
         case CardId::LEG_SWEEP:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 14 : 11)));
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(t, up ? 3 : 2, false));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 14 : 11));
+            Actions::DebuffEnemy<MS::WEAK>(*this, t, up ? 3 : 2, false);
             break;
 
         case CardId::SETUP:
-            addToBot(Actions::SetupAction());
+            Actions::SetupAction(*this);
             break;
 
         case CardId::TERROR:
-            addToBot(Actions::DebuffEnemy<MS::VULNERABLE>(t, 99, false));
+            Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, 99, false);
             break;
 
         case CardId::EXPERTISE:
-            addToBot(Actions::DrawCards(std::max(0, 6 - cards.cardsInHand)));
+            Actions::DrawCards(*this, std::max(0, 6 - cards.cardsInHand));
             break;
 
         case CardId::PHANTASMAL_KILLER:
-            addToBot(Actions::BuffPlayer<PS::PHANTASMAL>());
+            Actions::BuffPlayer<PS::PHANTASMAL>(*this);
             break;
 
         case CardId::FUSION:
-            addToBot(Actions::ChannelOrb(Orb::FUSION, up ? 2 : 1));
+            Actions::ChannelOrb(*this, Orb::FUSION, up ? 2 : 1);
             break;
 
         case CardId::GENETIC_ALGORITHM: {
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 2 : 1) + c.specialData)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 2 : 1) + c.specialData));
             c.specialData += 1;
             if (item.purgeOnUse) {
                 cards.findAndUpgradeSpecialData(c.uniqueId, 1);
@@ -2227,8 +2136,8 @@ void BattleContext::useSkillCard() {
         }
 
         case CardId::FINESSE:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 4 : 2)) );
-            addToBot( Actions::DrawCards(1) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 4 : 2));
+            Actions::DrawCards(*this, 1);
             break;
 
         case CardId::FISSION: {
@@ -2237,59 +2146,59 @@ void BattleContext::useSkillCard() {
                 evokeCount += player.orbs[i] != Orb::EMPTY;
             }
             for (int i = 0; i < evokeCount; ++i) {
-                addToBot(Actions::EvokeFrontOrb());
+                Actions::EvokeFrontOrb(*this);
             }
-            addToBot(Actions::GainEnergy(evokeCount));
+            Actions::GainEnergy(*this, evokeCount);
             if (up) {
-                addToBot(Actions::DrawCards(evokeCount));
+                Actions::DrawCards(*this, evokeCount);
             }
             break;
         }
 
         case CardId::FORCE_FIELD:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 16 : 12)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 16 : 12));
             break;
 
         case CardId::GLACIER:
             for (int i = 0; i < (up ? 3 : 2); ++i) {
-                addToBot(Actions::ChannelOrb(Orb::FROST));
+                Actions::ChannelOrb(*this, Orb::FROST);
             }
             break;
 
         case CardId::FORETHOUGHT:
-            addToBot( Actions::ForethoughtAction(up) );
+            Actions::ForethoughtAction(*this, up);
             break;
 
         case CardId::PREPARED:
-            addToBot(Actions::DrawCards(up ? 2 : 1));
-            addToBot(Actions::DiscardOne());
+            Actions::DrawCards(*this, up ? 2 : 1);
+            Actions::DiscardOne(*this);
             break;
 
         case CardId::FLAME_BARRIER:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 16 : 12)) );
-            addToBot( Actions::BuffPlayer<PS::FLAME_BARRIER>(up ? 6 : 4) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 16 : 12));
+            Actions::BuffPlayer<PS::FLAME_BARRIER>(*this, up ? 6 : 4);
             break;
 
         case CardId::FLEX:
-            addToBot( Actions::BuffPlayer<PS::STRENGTH>(up ? 4 : 2) );
-            addToBot( Actions::DebuffPlayer<PS::LOSE_STRENGTH>(up ? 4 : 2) );
+            Actions::BuffPlayer<PS::STRENGTH>(*this, up ? 4 : 2);
+            Actions::DebuffPlayer<PS::LOSE_STRENGTH>(*this, up ? 4 : 2);
             break;
 
         case CardId::GHOSTLY_ARMOR:
-            addToBot( Actions::GainBlock(calculateCardBlock(up  ?  13 : 10)) );
+            Actions::GainBlock(*this, calculateCardBlock(up  ?  13 : 10));
             break;
 
         case CardId::GOOD_INSTINCTS:
-            addToBot( Actions::GainBlock(calculateCardBlock(up  ?  9 : 6)) );
+            Actions::GainBlock(*this, calculateCardBlock(up  ?  9 : 6));
             break;
 
         case CardId::HOLOGRAM:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 5 : 3)));
-            addToBot(Actions::BetterDiscardPileToHandAction(1, CardSelectTask::HOLOGRAM));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 5 : 3));
+            Actions::BetterDiscardPileToHandAction(*this, 1, CardSelectTask::HOLOGRAM);
             break;
 
         case CardId::HAVOC:
-            addToBot( Actions::PlayTopCard(monsters.getRandomMonsterIdx(cardRandomRng, true), true) );
+            Actions::PlayTopCard(*this, monsters.getRandomMonsterIdx(cardRandomRng, true), true);
             break;
 
         case CardId::IMPATIENCE: {
@@ -2301,54 +2210,54 @@ void BattleContext::useSkillCard() {
                 }
             }
             if (!hasAttack) {
-                addToBot(Actions::DrawCards(up ? 3 : 2));
+                Actions::DrawCards(*this, up ? 3 : 2);
             }
             break;
         }
 
         case CardId::IMPERVIOUS:
-            addToBot( Actions::GainBlock(calculateCardBlock(up  ?  40 : 30)) );
+            Actions::GainBlock(*this, calculateCardBlock(up  ?  40 : 30));
             break;
 
         case CardId::INFERNAL_BLADE:
-            addToBot( Actions::InfernalBladeAction() );
+            Actions::InfernalBladeAction(*this);
             break;
 
         case CardId::INTIMIDATE:
-            addToBot( Actions::DebuffAllEnemy<MS::WEAK>(up ? 2 : 1, false) ); // game justs adds one for each enemy in order
+            Actions::DebuffAllEnemy<MS::WEAK>(*this, up ? 2 : 1, false); // game justs adds one for each enemy in order
             break;
 
         case CardId::JACK_OF_ALL_TRADES: // the game decides the random cards here and adds maketempcardtobot
-            addToBot( Actions::JackOfAllTradesAction(up) );
+            Actions::JackOfAllTradesAction(*this, up);
             break;
 
         case CardId::JAX:
-            addToBot( Actions::PlayerLoseHp(3, true) );
-            addToBot( Actions::BuffPlayer<PS::STRENGTH>(up ? 3 : 2) );
+            Actions::PlayerLoseHp(*this, 3, true);
+            Actions::BuffPlayer<PS::STRENGTH>(*this, up ? 3 : 2);
             break;
 
         case CardId::LEAP:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 12 : 9)));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 12 : 9));
             break;
 
         case CardId::LIMIT_BREAK:
-            addToBot( Actions::LimitBreakAction() );
+            Actions::LimitBreakAction(*this);
             break;
 
         case CardId::MADNESS:
-            addToBot( Actions::MadnessAction() );
+            Actions::MadnessAction(*this);
             break;
 
         case CardId::MASTER_OF_STRATEGY:
-            addToBot( Actions::DrawCards(up ? 4 : 3) );
+            Actions::DrawCards(*this, up ? 4 : 3);
             break;
 
         case CardId::METAMORPHOSIS:
-            addToBot( Actions::PutRandomCardsInDrawPile(CardType::ATTACK, up ? 5 : 3) );
+            Actions::PutRandomCardsInDrawPile(*this, CardType::ATTACK, up ? 5 : 3);
             break;
 
         case CardId::MIRACLE:
-            addToBot(Actions::GainEnergy(up ? 2 : 1));
+            Actions::GainEnergy(*this, up ? 2 : 1);
             break;
 
         case CardId::MULTI_CAST: {
@@ -2357,113 +2266,113 @@ void BattleContext::useSkillCard() {
             }
             const int evokeCount = item.energyOnUse + (up ? 1 : 0);
             for (int i = 0; i < evokeCount; ++i) {
-                addToBot(Actions::EvokeFrontOrb());
+                Actions::EvokeFrontOrb(*this);
             }
             break;
         }
 
         case CardId::OVERCLOCK:
-            addToBot(Actions::DrawCards(up ? 3 : 2));
-            addToBot(Actions::MakeTempCardInDiscard(CardInstance(CardId::BURN), 1));
+            Actions::DrawCards(*this, up ? 3 : 2);
+            Actions::MakeTempCardInDiscard(*this, CardInstance(CardId::BURN), 1);
             break;
 
         case CardId::OFFERING:
-            addToBot( Actions::PlayerLoseHp(6, true) );
-            addToBot( Actions::GainEnergy(2) );
-            addToBot( Actions::DrawCards(up ? 5 : 3) );
+            Actions::PlayerLoseHp(*this, 6, true);
+            Actions::GainEnergy(*this, 2);
+            Actions::DrawCards(*this, up ? 5 : 3);
             break;
 
         case CardId::PANACEA:
-            addToBot( Actions::BuffPlayer<PS::ARTIFACT>(up ? 2 : 1) );
+            Actions::BuffPlayer<PS::ARTIFACT>(*this, up ? 2 : 1);
             break;
 
         case CardId::PANIC_BUTTON:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 40 : 30)) );
-            addToBot( Actions::DebuffPlayer<PS::NO_BLOCK>(2) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 40 : 30));
+            Actions::DebuffPlayer<PS::NO_BLOCK>(*this, 2);
             break;
 
         case CardId::POWER_THROUGH:
-            addToBot( Actions::MakeTempCardInHand(CardId::WOUND, false, 2) );
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 20 : 15)) );
+            Actions::MakeTempCardInHand(*this, CardId::WOUND, false, 2);
+            Actions::GainBlock(*this, calculateCardBlock(up ? 20 : 15));
             break;
 
         case CardId::PURITY:
-            addToBot( Actions::ExhaustMany(up ? 5 : 3) );
+            Actions::ExhaustMany(*this, up ? 5 : 3);
             break;
 
         case CardId::REPROGRAM:
-            addToBot(Actions::DebuffPlayer<PS::FOCUS>(-1, false));
-            addToBot(Actions::BuffPlayer<PS::STRENGTH>(up ? 2 : 1));
-            addToBot(Actions::BuffPlayer<PS::DEXTERITY>(up ? 2 : 1));
+            Actions::DebuffPlayer<PS::FOCUS>(*this, -1, false);
+            Actions::BuffPlayer<PS::STRENGTH>(*this, up ? 2 : 1);
+            Actions::BuffPlayer<PS::DEXTERITY>(*this, up ? 2 : 1);
             break;
 
         case CardId::RAINBOW:
-            addToBot(Actions::ChannelOrb(Orb::LIGHTNING));
-            addToBot(Actions::ChannelOrb(Orb::FROST));
-            addToBot(Actions::ChannelOrb(Orb::DARK));
+            Actions::ChannelOrb(*this, Orb::LIGHTNING);
+            Actions::ChannelOrb(*this, Orb::FROST);
+            Actions::ChannelOrb(*this, Orb::DARK);
             break;
 
         case CardId::RECURSION: {
             const Orb front = player.orbSlots > 0 ? player.orbs[0] : Orb::EMPTY;
             const int frontOrbData = player.orbSlots > 0 ? player.orbData[0] : 0;
             if (front != Orb::EMPTY) {
-                addToBot(Actions::EvokeFrontOrb());
-                addToBot(Actions::ChannelOrb(front, frontOrbData));
+                Actions::EvokeFrontOrb(*this);
+                Actions::ChannelOrb(*this, front, frontOrbData);
             }
             break;
         }
 
         case CardId::RAGE:
-            addToBot( Actions::BuffPlayer<PS::RAGE>(up ? 5 : 3) );
+            Actions::BuffPlayer<PS::RAGE>(*this, up ? 5 : 3);
             break;
 
         case CardId::SECRET_TECHNIQUE:
-            addToBot( Actions::DrawToHandAction(CardSelectTask::SECRET_TECHNIQUE, CardType::SKILL) );
+            Actions::DrawToHandAction(*this, CardSelectTask::SECRET_TECHNIQUE, CardType::SKILL);
             break;
 
         case CardId::SECRET_WEAPON:
-            addToBot( Actions::DrawToHandAction(CardSelectTask::SECRET_WEAPON, CardType::ATTACK) );
+            Actions::DrawToHandAction(*this, CardSelectTask::SECRET_WEAPON, CardType::ATTACK);
             break;
 
         case CardId::SECOND_WIND:
-            addToBot( Actions::SecondWindAction(calculateCardBlock(up ? 7 : 5)) );
+            Actions::SecondWindAction(*this, calculateCardBlock(up ? 7 : 5));
             break;
 
         case CardId::SEEING_RED:
-            addToBot( Actions::GainEnergy(2) );
+            Actions::GainEnergy(*this, 2);
             break;
 
         case CardId::SENTINEL:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 8 : 5)) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 8 : 5));
             break;
 
         case CardId::SEEK:
-            addToBot(Actions::SeekAction(up ? 2 : 1));
+            Actions::SeekAction(*this, up ? 2 : 1);
             break;
 
         case CardId::SHOCKWAVE:
-            addToBot( Actions::DebuffAllEnemy<MS::WEAK>(up ? 5 : 3, false) );
-            addToBot( Actions::DebuffAllEnemy<MS::VULNERABLE>(up ? 5 : 3, false) );
+            Actions::DebuffAllEnemy<MS::WEAK>(*this, up ? 5 : 3, false);
+            Actions::DebuffAllEnemy<MS::VULNERABLE>(*this, up ? 5 : 3, false);
             break;
 
         case CardId::REINFORCED_BODY: {
             if (!item.ignoreEnergyTotal && player.energy < item.energyOnUse) {
                 item.energyOnUse = player.energy;
             }
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 9 : 7) * item.energyOnUse)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 9 : 7) * item.energyOnUse));
             break;
         }
 
         case CardId::REBOOT:
-            addToBot(Actions::RebootAction(up ? 6 : 4));
+            Actions::RebootAction(*this, up ? 6 : 4);
             break;
 
         case CardId::RECYCLE:
-            addToBot(Actions::RecycleAction());
+            Actions::RecycleAction(*this);
             break;
 
         case CardId::SKIM:
-            addToBot(Actions::DrawCards(up ? 4 : 3));
+            Actions::DrawCards(*this, up ? 4 : 3);
             break;
 
         case CardId::STACK: {
@@ -2471,35 +2380,35 @@ void BattleContext::useSkillCard() {
             for (int i = 0; i < player.orbSlots; ++i) {
                 orbCount += player.orbs[i] != Orb::EMPTY;
             }
-            addToBot(Actions::GainBlock(calculateCardBlock((up ? 4 : 3) * orbCount)));
+            Actions::GainBlock(*this, calculateCardBlock((up ? 4 : 3) * orbCount));
             break;
         }
 
         case CardId::STEAM_BARRIER:
-            addToBot(Actions::GainBlock(calculateCardBlock(std::max(0, (up ? 8 : 6) + c.specialData))));
+            Actions::GainBlock(*this, calculateCardBlock(std::max(0, (up ? 8 : 6) + c.specialData)));
             --c.specialData;
             break;
 
         case CardId::STORM_OF_STEEL:
-            addToBot(Actions::StormOfSteelAction(up));
+            Actions::StormOfSteelAction(*this, up);
             break;
 
         case CardId::SHRUG_IT_OFF:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 11 : 8)) );
-            addToBot( Actions::DrawCards(1) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 11 : 8));
+            Actions::DrawCards(*this, 1);
             break;
 
         case CardId::SPOT_WEAKNESS:
-            addToBot( Actions::SpotWeaknessAction(t, up ? 4 : 3) );
+            Actions::SpotWeaknessAction(*this, t, up ? 4 : 3);
             break;
 
         case CardId::THE_BOMB:
-            addToBot( Actions::BuffPlayer<PS::THE_BOMB>(up ? 50 : 40) );
+            Actions::BuffPlayer<PS::THE_BOMB>(*this, up ? 50 : 40);
             break;
 
         case CardId::THINKING_AHEAD: // same as upgraded warcry
-            addToBot( Actions::DrawCards(2) );
-            addToBot( Actions::WarcryAction() );
+            Actions::DrawCards(*this, 2);
+            Actions::WarcryAction(*this);
             break;
 
         case CardId::TRANSMUTATION:
@@ -2510,33 +2419,33 @@ void BattleContext::useSkillCard() {
                 item.energyOnUse = player.energy;
             }
 
-            addToBot( Actions::TransmutationAction(up, item.energyOnUse, !(item.freeToPlay || c.freeToPlayOnce)) );
+            Actions::TransmutationAction(*this, up, item.energyOnUse, !(item.freeToPlay || c.freeToPlayOnce));
             break;
 
         case CardId::TRIP: // maybe fixed --- todo this doesn't work properly because it only requires a target when not upgraded, also the trip card doesn't uses its own implementation of debuff all enemy
             if (up) {
-                addToBot( Actions::DebuffAllEnemy<MS::VULNERABLE>(2, false) );
+                Actions::DebuffAllEnemy<MS::VULNERABLE>(*this, 2, false);
             } else {
-                addToBot( Actions::DebuffEnemy<MS::VULNERABLE>(t, 2, false) );
+                Actions::DebuffEnemy<MS::VULNERABLE>(*this, t, 2, false);
             }
             break;
 
         case CardId::TRUE_GRIT:
-            addToBot( Actions::GainBlock(calculateCardBlock(up ? 9 : 7)) );
+            Actions::GainBlock(*this, calculateCardBlock(up ? 9 : 7));
             if (up) {
-                addToBot( Actions::ChooseExhaustOne() );
+                Actions::ChooseExhaustOne(*this);
             } else {
-                addToBot( Actions::ExhaustRandomCardInHand(1) );
+                Actions::ExhaustRandomCardInHand(*this, 1);
             }
             break;
 
         case CardId::VIOLENCE:
-            addToBot( Actions::ViolenceAction(up ? 4 : 3) );
+            Actions::ViolenceAction(*this, up ? 4 : 3);
             break;
 
         case CardId::TURBO:
-            addToBot(Actions::GainEnergy(up ? 4 : 3));
-            addToBot(Actions::MakeTempCardInDiscard(CardInstance(CardId::VOID), 1));
+            Actions::GainEnergy(*this, up ? 4 : 3);
+            Actions::MakeTempCardInDiscard(*this, CardInstance(CardId::VOID), 1);
             break;
 
         case CardId::TEMPEST:
@@ -2544,22 +2453,22 @@ void BattleContext::useSkillCard() {
                 item.energyOnUse = player.energy;
             }
             for (int i = 0; i < item.energyOnUse; ++i) {
-                addToBot(Actions::ChannelOrb(Orb::LIGHTNING));
+                Actions::ChannelOrb(*this, Orb::LIGHTNING);
             }
             break;
 
         case CardId::VIGILANCE:
-            addToBot(Actions::GainBlock(calculateCardBlock(up ? 12 : 8)));
-            addToBot(Actions::ChangeStance(Stance::CALM));
+            Actions::GainBlock(*this, calculateCardBlock(up ? 12 : 8));
+            Actions::ChangeStance(*this, Stance::CALM);
             break;
 
         case CardId::WARCRY:
-            addToBot( Actions::DrawCards(up ? 2 : 1) );
-            addToBot( Actions::WarcryAction() );
+            Actions::DrawCards(*this, up ? 2 : 1);
+            Actions::WarcryAction(*this);
             break;
 
         case CardId::WHITE_NOISE:
-            addToBot(Actions::MakeRandomCardInHand(CardType::POWER, 1, true));
+            Actions::MakeRandomCardInHand(*this, CardType::POWER, 1, true);
             break;
 
         default:
@@ -2574,7 +2483,7 @@ void BattleContext::useSkillCard() {
 }
 
 void BattleContext::usePowerCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     const auto t = item.target;
@@ -2583,35 +2492,35 @@ void BattleContext::usePowerCard() {
     switch (c.getId()) {
 
         case CardId::ACCURACY:
-            addToBot(Actions::BuffPlayer<PS::ACCURACY>(up ? 6 : 4));
+            Actions::BuffPlayer<PS::ACCURACY>(*this, up ? 6 : 4);
             break;
 
         case CardId::AFTER_IMAGE:
-            addToBot(Actions::BuffPlayer<PS::AFTER_IMAGE>(1));
+            Actions::BuffPlayer<PS::AFTER_IMAGE>(*this, 1);
             break;
 
         case CardId::A_THOUSAND_CUTS:
-            addToBot(Actions::BuffPlayer<PS::THOUSAND_CUTS>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::THOUSAND_CUTS>(*this, up ? 2 : 1);
             break;
 
         case CardId::BATTLE_HYMN:
-            addToBot(Actions::BuffPlayer<PS::BATTLE_HYMN>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::BATTLE_HYMN>(*this, up ? 2 : 1);
             break;
 
         case CardId::DEVA_FORM:
-            addToBot(Actions::BuffPlayer<PS::DEVA>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::DEVA>(*this, up ? 2 : 1);
             break;
 
         case CardId::DEVOTION:
-            addToBot(Actions::BuffPlayer<PS::DEVOTION>(up ? 3 : 2));
+            Actions::BuffPlayer<PS::DEVOTION>(*this, up ? 3 : 2);
             break;
 
         case CardId::ESTABLISHMENT:
-            addToBot(Actions::BuffPlayer<PS::ESTABLISHMENT>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::ESTABLISHMENT>(*this, up ? 2 : 1);
             break;
 
         case CardId::LIKE_WATER:
-            addToBot(Actions::BuffPlayer<PS::LIKE_WATER>(up ? 7 : 5));
+            Actions::BuffPlayer<PS::LIKE_WATER>(*this, up ? 7 : 5);
             break;
 
         case CardId::MENTAL_FORTRESS:
@@ -2619,16 +2528,16 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::MASTER_REALITY:
-            addToBot(Actions::BuffPlayer<PS::MASTER_REALITY>(1));
+            Actions::BuffPlayer<PS::MASTER_REALITY>(*this, 1);
             break;
 
         case CardId::FORESIGHT:
-            addToBot(Actions::BuffPlayer<PS::FORESIGHT>(up ? 4 : 3));
+            Actions::BuffPlayer<PS::FORESIGHT>(*this, up ? 4 : 3);
             break;
 
         case CardId::FASTING:
-            addToBot(Actions::BuffPlayer<PS::STRENGTH>(up ? 4 : 3));
-            addToBot(Actions::BuffPlayer<PS::DEXTERITY>(up ? 4 : 3));
+            Actions::BuffPlayer<PS::STRENGTH>(*this, up ? 4 : 3);
+            Actions::BuffPlayer<PS::DEXTERITY>(*this, up ? 4 : 3);
             --player.energyPerTurn;
             break;
 
@@ -2645,11 +2554,11 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::WAVE_OF_THE_HAND:
-            addToBot(Actions::BuffPlayer<PS::WAVE_OF_THE_HAND>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::WAVE_OF_THE_HAND>(*this, up ? 2 : 1);
             break;
 
         case CardId::WREATH_OF_FLAME:
-            addToBot(Actions::BuffPlayer<PS::VIGOR>(up ? 8 : 5));
+            Actions::BuffPlayer<PS::VIGOR>(*this, up ? 8 : 5);
             break;
 
         case CardId::WELL_LAID_PLANS:
@@ -2657,11 +2566,11 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::CALTROPS:
-            addToBot(Actions::BuffPlayer<PS::THORNS>(up ? 5 : 3));
+            Actions::BuffPlayer<PS::THORNS>(*this, up ? 5 : 3);
             break;
 
         case CardId::ENVENOM:
-            addToBot(Actions::BuffPlayer<PS::ENVENOM>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::ENVENOM>(*this, up ? 2 : 1);
             break;
 
         case CardId::BARRICADE:
@@ -2669,25 +2578,25 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::BIASED_COGNITION:
-            addToBot(Actions::BuffPlayer<PS::FOCUS>(up ? 5 : 4));
-            addToBot(Actions::BuffPlayer<PS::BIAS>(1));
+            Actions::BuffPlayer<PS::FOCUS>(*this, up ? 5 : 4);
+            Actions::BuffPlayer<PS::BIAS>(*this, 1);
             break;
 
         case CardId::BUFFER:
-            addToBot(Actions::BuffPlayer<PS::BUFFER>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::BUFFER>(*this, up ? 2 : 1);
             break;
 
         case CardId::BERSERK:
             ++player.energyPerTurn;
-            addToBot( Actions::DebuffPlayer<PS::VULNERABLE>(up ? 1 : 2, false) );
+            Actions::DebuffPlayer<PS::VULNERABLE>(*this, up ? 1 : 2, false);
             break;
 
         case CardId::BRUTALITY:
-            addToBot( Actions::BuffPlayer<PS::BRUTALITY>(1) );
+            Actions::BuffPlayer<PS::BRUTALITY>(*this, 1);
             break;
 
         case CardId::CORRUPTION:
-            addToBot( Actions::BuffPlayer<PS::CORRUPTION>() );
+            Actions::BuffPlayer<PS::CORRUPTION>(*this);
             break;
 
         case CardId::CAPACITOR:
@@ -2695,79 +2604,79 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::COMBUST:
-            addToBot( Actions::BuffPlayer<PS::COMBUST>(up ? 7 : 5) );
+            Actions::BuffPlayer<PS::COMBUST>(*this, up ? 7 : 5);
             break;
 
         case CardId::DEMON_FORM:
-            addToBot( Actions::BuffPlayer<PS::DEMON_FORM>(up ? 3 : 2) );
+            Actions::BuffPlayer<PS::DEMON_FORM>(*this, up ? 3 : 2);
             break;
 
         case CardId::DARK_EMBRACE:
-            addToBot( Actions::BuffPlayer<PS::DARK_EMBRACE>(1) );
+            Actions::BuffPlayer<PS::DARK_EMBRACE>(*this, 1);
             break;
 
         case CardId::DEFRAGMENT:
-            addToBot(Actions::BuffPlayer<PS::FOCUS>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::FOCUS>(*this, up ? 2 : 1);
             break;
 
         case CardId::ECHO_FORM:
-            addToBot(Actions::BuffPlayer<PS::ECHO_FORM>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::ECHO_FORM>(*this, up ? 2 : 1);
             break;
 
         case CardId::EVOLVE:
-            addToBot( Actions::BuffPlayer<PS::EVOLVE>(up ? 2 : 1) );
+            Actions::BuffPlayer<PS::EVOLVE>(*this, up ? 2 : 1);
             break;
 
         case CardId::FEEL_NO_PAIN:
-            addToBot( Actions::BuffPlayer<PS::FEEL_NO_PAIN>(up ? 4 : 3) );
+            Actions::BuffPlayer<PS::FEEL_NO_PAIN>(*this, up ? 4 : 3);
             break;
 
         case CardId::FOOTWORK:
-            addToBot(Actions::BuffPlayer<PS::DEXTERITY>(up ? 3 : 2));
+            Actions::BuffPlayer<PS::DEXTERITY>(*this, up ? 3 : 2);
             break;
 
         case CardId::FIRE_BREATHING:
-            addToBot( Actions::BuffPlayer<PS::FIRE_BREATHING>(up ? 10 : 6) );
+            Actions::BuffPlayer<PS::FIRE_BREATHING>(*this, up ? 10 : 6);
             break;
 
         case CardId::INFLAME:
-            addToBot( Actions::BuffPlayer<PS::STRENGTH>(up ? 3 : 2) );
+            Actions::BuffPlayer<PS::STRENGTH>(*this, up ? 3 : 2);
             break;
 
         case CardId::JUGGERNAUT:
-            addToBot( Actions::BuffPlayer<PS::JUGGERNAUT>(up ? 7 : 5) );
+            Actions::BuffPlayer<PS::JUGGERNAUT>(*this, up ? 7 : 5);
             break;
 
         case CardId::LOOP:
-            addToBot(Actions::BuffPlayer<PS::LOOP>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::LOOP>(*this, up ? 2 : 1);
             break;
 
         case CardId::MAGNETISM:
-            addToBot( Actions::BuffPlayer<PS::MAGNETISM>(1) );
+            Actions::BuffPlayer<PS::MAGNETISM>(*this, 1);
             break;
 
         case CardId::MAYHEM:
-            addToBot( Actions::BuffPlayer<PS::MAYHEM>(1) );
+            Actions::BuffPlayer<PS::MAYHEM>(*this, 1);
             break;
 
         case CardId::METALLICIZE:
-            addToBot( Actions::BuffPlayer<PS::METALLICIZE>(up ? 4 : 3) );
+            Actions::BuffPlayer<PS::METALLICIZE>(*this, up ? 4 : 3);
             break;
 
         case CardId::PANACHE:
-            addToBot( Actions::BuffPlayer<PS::PANACHE>(up ? 14 : 10) );
+            Actions::BuffPlayer<PS::PANACHE>(*this, up ? 14 : 10);
             break;
 
         case CardId::RUPTURE:
-            addToBot(Actions::BuffPlayer<PS::RUPTURE>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::RUPTURE>(*this, up ? 2 : 1);
             break;
 
         case CardId::INFINITE_BLADES:
-            addToBot(Actions::BuffPlayer<PS::INFINITE_BLADES>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::INFINITE_BLADES>(*this, up ? 2 : 1);
             break;
 
         case CardId::NOXIOUS_FUMES:
-            addToBot(Actions::BuffPlayer<PS::NOXIOUS_FUMES>(up ? 3 : 2));
+            Actions::BuffPlayer<PS::NOXIOUS_FUMES>(*this, up ? 3 : 2);
             break;
 
         case CardId::CREATIVE_AI:
@@ -2799,20 +2708,20 @@ void BattleContext::usePowerCard() {
             break;
 
         case CardId::STATIC_DISCHARGE:
-            addToBot(Actions::BuffPlayer<PS::STATIC_DISCHARGE>(up ? 2 : 1));
+            Actions::BuffPlayer<PS::STATIC_DISCHARGE>(*this, up ? 2 : 1);
             break;
 
         case CardId::TOOLS_OF_THE_TRADE:
-            addToBot(Actions::BuffPlayer<PS::TOOLS_OF_THE_TRADE>());
+            Actions::BuffPlayer<PS::TOOLS_OF_THE_TRADE>(*this);
             break;
 
         case CardId::SADISTIC_NATURE:
-            addToBot( Actions::BuffPlayer<PS::SADISTIC>(up ? 7 : 5) );
+            Actions::BuffPlayer<PS::SADISTIC>(*this, up ? 7 : 5);
             break;
 
         case CardId::WRAITH_FORM:
-            addToBot( Actions::BuffPlayer<PS::INTANGIBLE>(up ? 3 : 2) );
-            addToBot( Actions::DebuffPlayer<PS::WRAITH_FORM>(1) );
+            Actions::BuffPlayer<PS::INTANGIBLE>(*this, up ? 3 : 2);
+            Actions::DebuffPlayer<PS::WRAITH_FORM>(*this, 1);
             break;
 
         default:
@@ -2829,7 +2738,7 @@ void BattleContext::usePowerCard() {
 
 
 void BattleContext::onUseAttackCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     auto &p = player;
@@ -2838,7 +2747,7 @@ void BattleContext::onUseAttackCard() {
     // ********* Powers onUseCard *********
 
     if (p.hasStatus<PS::AFTER_IMAGE>()) {
-        addToBot(Actions::GainBlock(p.getStatus<PS::AFTER_IMAGE>()));
+        Actions::GainBlock(*this, p.getStatus<PS::AFTER_IMAGE>());
     }
 
     if (!item.purgeOnUse && p.hasStatus<PS::DOUBLE_TAP>()) {
@@ -2861,11 +2770,11 @@ void BattleContext::onUseAttackCard() {
     }
 
     if (p.hasStatus<PS::PANACHE>() && --p.panacheCounter <= 0) {
-        addToBot( Actions::DamageAllEnemy(p.getStatus<PS::PANACHE>()) );
+        Actions::DamageAllEnemy(*this, p.getStatus<PS::PANACHE>());
     }
 
     if (p.hasStatus<PS::RAGE>()) {
-        addToBot( Actions::GainBlock(p.getStatus<PS::RAGE>()) );
+        Actions::GainBlock(*this, p.getStatus<PS::RAGE>());
     }
 
     if (p.hasStatus<PS::VIGOR>()) {
@@ -2878,7 +2787,7 @@ void BattleContext::onUseAttackCard() {
 
     if (p.hasStatus<PS::PEN_NIB>()) {
         // todo does this need to be added to bot?
-        addToBot( Actions::RemoveStatus<PS::PEN_NIB>() );
+        Actions::RemoveStatus<PS::PEN_NIB>(*this);
     }
 
     // ********* Relics onUseCard *********
@@ -2888,28 +2797,28 @@ void BattleContext::onUseAttackCard() {
         p.inkBottleCounter++;
         if (p.inkBottleCounter == 10) {
             p.inkBottleCounter = 0;
-            addToBot( Actions::DrawCards(1) );
+            Actions::DrawCards(*this, 1);
         }
     }
 
     if (p.hasRelic<R::KUNAI>() && p.attacksPlayedThisTurn % 3 == 0) {
-        addToBot( Actions::BuffPlayer<PS::DEXTERITY>(1) );
+        Actions::BuffPlayer<PS::DEXTERITY>(*this, 1);
     }
 
     if (p.hasRelic<R::ORANGE_PELLETS>()) {
         p.orangePelletsCardTypesPlayed.set(static_cast<int>(CardType::ATTACK), true); // set bit 0 true
         if (p.orangePelletsCardTypesPlayed.all()) {
             p.orangePelletsCardTypesPlayed.reset();
-            addToBot(Actions::RemovePlayerDebuffs());
+            Actions::RemovePlayerDebuffs(*this);
         }
     }
 
     if (p.hasRelic<R::ORNAMENTAL_FAN>() && p.attacksPlayedThisTurn % 3 == 0) {
-        addToBot( Actions::GainBlock(4) );
+        Actions::GainBlock(*this, 4);
     }
 
     if (p.hasRelic<R::SHURIKEN>() && p.attacksPlayedThisTurn % 3 == 0) {
-        addToBot( Actions::BuffPlayer<PS::STRENGTH>(1) );
+        Actions::BuffPlayer<PS::STRENGTH>(*this, 1);
     }
 
     if (p.hasRelic<R::NECRONOMICON>() && !p.haveUsedNecronomiconThisTurn && !item.freeToPlay && !item.purgeOnUse &&
@@ -2921,18 +2830,18 @@ void BattleContext::onUseAttackCard() {
     if (p.hasRelic<R::PEN_NIB>()) {
         ++p.penNibCounter;
         if (p.penNibCounter == 9) {
-            addToBot( Actions::BuffPlayer<PS::PEN_NIB>(1) );
+            Actions::BuffPlayer<PS::PEN_NIB>(*this, 1);
             p.penNibCounter = -1; // take note of this
         }
     }
 
     if (p.hasRelic<R::DUALITY>()) {
-        addToBot(Actions::DualityAction());
+        Actions::DualityAction(*this);
     }
 
     if (p.hasRelic<R::NUNCHAKU>()) {
         if (++p.nunchakuCounter >= 10) {
-            addToBot(Actions::GainEnergy(1));
+            Actions::GainEnergy(*this, 1);
             p.nunchakuCounter = 0;
         }
     }
@@ -2949,13 +2858,13 @@ void BattleContext::onUseAttackCard() {
 
     auto &m = monsters.arr[0];
     if (m.hasStatus<MS::SHARP_HIDE>()) {
-        addToBot( Actions::DamagePlayer(m.getStatus<MS::SHARP_HIDE>()));
+        Actions::DamagePlayer(*this, m.getStatus<MS::SHARP_HIDE>());
     }
 
 }
 
 void BattleContext::onUseSkillCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     auto &p = player;
@@ -2964,7 +2873,7 @@ void BattleContext::onUseSkillCard() {
     // ********* Powers onUseCard *********
 
     if (p.hasStatus<PS::AFTER_IMAGE>()) {
-        addToBot(Actions::GainBlock(p.getStatus<PS::AFTER_IMAGE>()));
+        Actions::GainBlock(*this, p.getStatus<PS::AFTER_IMAGE>());
     }
 
     if (!item.purgeOnUse && p.hasStatus<PS::BURST>()) {
@@ -2987,11 +2896,11 @@ void BattleContext::onUseSkillCard() {
     }
 
     if (p.hasStatus<PS::HEX>()) {
-        addToBot( Actions::MakeTempCardInDrawPile(CardInstance(CardId::DAZED), 1, true) );
+        Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::DAZED), 1, true);
     }
 
     if (p.hasStatus<PS::PANACHE>() && --p.panacheCounter <= 0) {
-        addToBot( Actions::DamageAllEnemy(p.getStatus<PS::PANACHE>()) );
+        Actions::DamageAllEnemy(*this, p.getStatus<PS::PANACHE>());
     }
 
     // todo Storm
@@ -3005,7 +2914,7 @@ void BattleContext::onUseSkillCard() {
         p.inkBottleCounter++;
         if (p.inkBottleCounter == 10) {
             p.inkBottleCounter = 0;
-            addToBot( Actions::DrawCards(1) );
+            Actions::DrawCards(*this, 1);
         }
     }
 
@@ -3013,13 +2922,13 @@ void BattleContext::onUseSkillCard() {
         p.orangePelletsCardTypesPlayed.set(static_cast<int>(CardType::SKILL), true); // set bit 0 true
         if (p.orangePelletsCardTypesPlayed.all()) {
             p.orangePelletsCardTypesPlayed.reset();
-            addToBot(Actions::RemovePlayerDebuffs());
+            Actions::RemovePlayerDebuffs(*this);
         }
     }
 
     if (p.hasRelic<R::LETTER_OPENER>()) {
         if (p.skillsPlayedThisTurn >= 3 &&  p.skillsPlayedThisTurn % 3 == 0) {
-            addToBot(Actions::DamageAllEnemy(5));
+            Actions::DamageAllEnemy(*this, 5);
         }
     }
 
@@ -3043,14 +2952,14 @@ void BattleContext::onUseSkillCard() {
 }
 
 void BattleContext::onUsePowerCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
     auto &p = player;
 
     cards.reduceForceFieldCosts();
 
     if (p.hasStatus<PS::AFTER_IMAGE>()) {
-        addToBot(Actions::GainBlock(p.getStatus<PS::AFTER_IMAGE>()));
+        Actions::GainBlock(*this, p.getStatus<PS::AFTER_IMAGE>());
     }
 
     if (!item.purgeOnUse && p.hasStatus<PS::AMPLIFY>()) {
@@ -3073,18 +2982,18 @@ void BattleContext::onUsePowerCard() {
     }
 
     if (p.hasStatus<PS::HEX>()) {
-        addToBot( Actions::MakeTempCardInDrawPile(CardInstance(CardId::DAZED), 1, true) );
+        Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::DAZED), 1, true);
     }
 
     if (p.hasStatus<PS::PANACHE>() && --p.panacheCounter <= 0) {
-        addToBot( Actions::DamageAllEnemy(p.getStatus<PS::PANACHE>()) );
+        Actions::DamageAllEnemy(*this, p.getStatus<PS::PANACHE>());
     }
 
     for (int i = 0; i < p.storm; ++i) {
-        addToBot(Actions::ChannelOrb(Orb::LIGHTNING));
+        Actions::ChannelOrb(*this, Orb::LIGHTNING);
     }
     if (p.heatsinks > 0) {
-        addToBot(Actions::DrawCards(p.heatsinks));
+        Actions::DrawCards(*this, p.heatsinks);
     }
 
     // ********* Relics onUseCard *********
@@ -3097,7 +3006,7 @@ void BattleContext::onUsePowerCard() {
         p.inkBottleCounter++;
         if (p.inkBottleCounter == 10) {
             p.inkBottleCounter = 0;
-            addToBot( Actions::DrawCards(1) );
+            Actions::DrawCards(*this, 1);
         }
     }
 
@@ -3105,7 +3014,7 @@ void BattleContext::onUsePowerCard() {
         p.orangePelletsCardTypesPlayed.set(static_cast<int>(CardType::POWER), true); // set bit 0 true
         if (p.orangePelletsCardTypesPlayed.all()) {
             p.orangePelletsCardTypesPlayed.reset();
-            addToBot(Actions::RemovePlayerDebuffs());
+            Actions::RemovePlayerDebuffs(*this);
         }
     }
 
@@ -3120,12 +3029,12 @@ void BattleContext::onUsePowerCard() {
 }
 
 void BattleContext::onUseStatusOrCurseCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
     auto &p = player;
 
     if (p.hasStatus<PS::AFTER_IMAGE>()) {
-        addToBot(Actions::GainBlock(p.getStatus<PS::AFTER_IMAGE>()));
+        Actions::GainBlock(*this, p.getStatus<PS::AFTER_IMAGE>());
     }
 
     if (!item.purgeOnUse && p.hasStatus<PS::DUPLICATION>()) {
@@ -3143,16 +3052,16 @@ void BattleContext::onUseStatusOrCurseCard() {
     }
 
     if (p.hasStatus<PS::HEX>()) {
-        addToBot( Actions::MakeTempCardInDrawPile(CardInstance(CardId::DAZED), 1, true) );
+        Actions::MakeTempCardInDrawPile(*this, CardInstance(CardId::DAZED), 1, true);
     }
 
     if (p.hasStatus<PS::PANACHE>() && --p.panacheCounter <= 0) {
-        addToBot( Actions::DamageAllEnemy(p.getStatus<PS::PANACHE>()) );
+        Actions::DamageAllEnemy(*this, p.getStatus<PS::PANACHE>());
     }
 
     if (c.getType() == CardType::CURSE) {
         if (p.hasRelic<R::BLUE_CANDLE>()) {
-            addToBot( Actions::PlayerLoseHp(1, true) );
+            Actions::PlayerLoseHp(*this, 1, true);
             item.exhaustOnUse = true;
         }
 
@@ -3166,14 +3075,14 @@ void BattleContext::onUseStatusOrCurseCard() {
         p.inkBottleCounter++;
         if (p.inkBottleCounter == 10) {
             p.inkBottleCounter = 0;
-            addToBot( Actions::DrawCards(1) );
+            Actions::DrawCards(*this, 1);
         }
     }
 
 }
 
 void BattleContext::onAfterUseCard() {
-    auto &item = curCardQueueItem;
+    auto &item = currentCard;
     auto &c = item.card;
 
     if (item.triggerOnUse) {
@@ -3194,7 +3103,7 @@ void BattleContext::onAfterUseCard() {
             m.buff<MS::SLOW>(1);
         }
         if (m.hasStatus<MS::BEAT_OF_DEATH>()) {
-            addToBot( Actions::DamagePlayer(m.getStatus<MS::BEAT_OF_DEATH>()) );
+            Actions::DamagePlayer(*this, m.getStatus<MS::BEAT_OF_DEATH>());
         }
     }
 
@@ -3235,7 +3144,6 @@ void BattleContext::onAfterUseCard() {
     } else {
         // targetCard.exhaustOnUseOnce = false;
         // targetCard.dontTriggerOnUseCard = false;
-        // this.addToBot(new HandCheckAction());
 
         if (rebound) { // these methods all call resetCardBeforeMoving but it looks unnecessary
             cards.moveToDrawPileTop(c);
@@ -3260,19 +3168,17 @@ void BattleContext::onAfterUseCard() {
 
     // this.targetCard.exhaustOnUseOnce = false;
     //            this.targetCard.dontTriggerOnUseCard = false;
-    //            this.addToBot(new HandCheckAction());
 }
 
 // **********************
 
 void BattleContext::endTurn() {
-#ifdef sts_assert
-    assert(!endTurnQueued);
-#endif //sts_assert
-    // todo probably dont need a card queue item for this
+    endTurnRequested = true;
     energyWasted += player.energy;
-    cardQueue.pushBack(CardQueueItem::endTurnItem());
-    endTurnQueued = true;
+    for (auto& frame : resolution) {
+        if (!frame.isCard()) frame.phase = ResolutionPhase::Done;
+        else if (frame.phase != ResolutionPhase::CardDone) frame.phase = ResolutionPhase::CardCleanup;
+    }
 }
 
 void BattleContext::callEndOfTurnActions() {
@@ -3280,7 +3186,7 @@ void BattleContext::callEndOfTurnActions() {
     // ********************* Player Relics OnPlayerEndTurn *********************
 
     if (player.hasRelic<R::CLOAK_CLASP>()) {
-        addToBot( Actions::GainBlock(cards.cardsInHand) );
+        Actions::GainBlock(*this, cards.cardsInHand);
     }
 
     if (player.hasRelic<R::FROZEN_CORE>()) {
@@ -3290,37 +3196,37 @@ void BattleContext::callEndOfTurnActions() {
     }
 
     if (player.hasRelic<R::NILRYS_CODEX>()) {
-        addToBot(Actions::CodexAction());
+        Actions::CodexAction(*this);
     }
 
     if (player.hasRelic<R::ORICHALCUM>()) {
         if (player.block <= 0) {
-            addToTop(Actions::GainBlock(6));
+            Actions::GainBlock(*this, 6);
         }
     }
 
     if (player.hasRelic<R::STONE_CALENDAR>()) {
         if (turn == 6) {
-            addToBot(Actions::DamageAllEnemy(52));
+            Actions::DamageAllEnemy(*this, 52);
         }
     }
 
     // ********************* Player Powers AtEndOfTurnPreEndTurnCards *********************
 
     if (player.hasStatus<PS::METALLICIZE>()) {
-        addToBot( Actions::GainBlock( player.getStatus<PS::METALLICIZE>()) );
+        Actions::GainBlock(*this,  player.getStatus<PS::METALLICIZE>());
     }
 
     if (player.hasStatus<PS::PLATED_ARMOR>()) {
-        addToBot( Actions::GainBlock(player.getStatus<PS::PLATED_ARMOR>()) );
+        Actions::GainBlock(*this, player.getStatus<PS::PLATED_ARMOR>());
     }
 
     if (player.hasStatus<PS::LIKE_WATER>() && player.stance == Stance::CALM) {
-        addToBot( Actions::GainBlock(player.getStatus<PS::LIKE_WATER>()) );
+        Actions::GainBlock(*this, player.getStatus<PS::LIKE_WATER>());
     }
 
     if (player.orbSlots) {
-        addToBot(Actions::TriggerEndOfTurnOrbsAction());
+        Actions::TriggerEndOfTurnOrbsAction(*this);
     }
 
     // todo for cards in hand call triggerOnEndOfTurnForPlayingCard
@@ -3335,11 +3241,11 @@ void BattleContext::callEndOfTurnActions() {
             case CardId::DOUBT:
             case CardId::SHAME:
             case CardId::REGRET: {
-                CardQueueItem item;
+                CardPlay item;
                 item.triggerOnUse = false;
                 item.regretCardCount = cards.cardsInHand;
                 item.card = c;
-                addToBotCard(item);
+                beginCard(item);
                 break;
             }
             default:
@@ -3355,24 +3261,14 @@ void BattleContext::onTurnEnding() {
 
     // ********************* Player Powers atEndOfTurn *********************
     player.applyEndOfTurnPowers(*this);
-    addToBot(Actions::ClearCardQueue());
-    addToBot(Actions::DiscardAtEndOfTurn());
 
     // todo reset card attributes here in draw, discard and hand
     cards.resetAttributesAtEndOfTurn();
 
-    addToBot(Actions::UnnamedEndOfTurnAction());
 }
 
 void BattleContext::callEndTurnEarlySequence() {
-    while (!cardQueue.isEmpty()) {
-        auto item = cardQueue.popFront();
-        if (item.autoplay && !item.purgeOnUse) {
-            addToBot( Actions::TimeEaterPlayCardQueueItem(item) );
-        }
-    }
-    addToTopCard(CardQueueItem::endTurnItem());
-    endTurnQueued = true;
+    endTurnAfterCurrentCard = true;
 }
 
 void BattleContext::applyEndOfRoundPowers() {
@@ -3407,7 +3303,7 @@ void BattleContext::afterMonsterTurns() {
 
     // player stance atStartOfTurn
     if (player.stance == Stance::DIVINITY) {
-        addToBot(Actions::ChangeStance(Stance::NEUTRAL));
+        Actions::ChangeStance(*this, Stance::NEUTRAL);
     }
 
     player.applyStartOfTurnRelics(*this);
@@ -3415,8 +3311,9 @@ void BattleContext::afterMonsterTurns() {
     // player applyStartOfTurnPreDrawCards() // no cards implement this
     // player.applyStartOfTurnCards() // only Eviscerate implements this
 
-    player.applyStartOfTurnPowers(*(this));
+}
 
+void BattleContext::finishStartTurn() {
     player.triggerStartOfTurnOrbs(*this);
 
     if (player.hasStatus<PS::BARRICADE>()) {
@@ -3435,7 +3332,7 @@ void BattleContext::afterMonsterTurns() {
         return;
     }
 
-    addToBot(Actions::DrawCards(player.cardDrawPerTurn)); // in this action, an effect queue item is added to rechard energy lol
+    Actions::DrawCards(*this, player.cardDrawPerTurn); // in this action, an effect queue item is added to rechard energy lol
 
     if (player.hasStatus<PS::DRAW_REDUCTION>()) {
         if (player.wasJustApplied<PS::DRAW_REDUCTION>()) {
@@ -3498,74 +3395,73 @@ void BattleContext::drinkPotion(int idx, int target) {
         player.heal(5);
     }
 
-    // todo - dont need to add to bot because always will have nothing in actionQueue?
 
     switch (p) {
         case Potion::AMBROSIA:
-            addToBot(Actions::ChangeStance(Stance::DIVINITY));
+            Actions::ChangeStance(*this, Stance::DIVINITY);
             break;
 
         case Potion::ANCIENT_POTION:
-            addToBot(Actions::BuffPlayer<PS::ARTIFACT>(hasBark ? 2 : 1));
+            Actions::BuffPlayer<PS::ARTIFACT>(*this, hasBark ? 2 : 1);
             break;
 
         case Potion::ATTACK_POTION:
-            addToBot(Actions::DiscoveryAction(CardType::ATTACK, hasBark ? 2 : 1));
+            Actions::DiscoveryAction(*this, CardType::ATTACK, hasBark ? 2 : 1);
             break;
 
         case Potion::BLESSING_OF_THE_FORGE:
-            addToBot(Actions::UpgradeAllCardsInHand());
+            Actions::UpgradeAllCardsInHand(*this);
             break;
 
         case Potion::BLOCK_POTION:
-            addToBot(Actions::GainBlock(hasBark ? 24 : 12));
+            Actions::GainBlock(*this, hasBark ? 24 : 12);
             break;
 
 
         case Potion::BLOOD_POTION: {
             int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 40 : 20)) / 100.0f));
-            addToBot(Actions::HealPlayer(healAmt));
+            Actions::HealPlayer(*this, healAmt);
             break;
         }
 
         case Potion::BOTTLED_MIRACLE:
-            addToBot(Actions::MakeTempCardInHand(CardId::MIRACLE, false, hasBark ? 4 : 2));
+            Actions::MakeTempCardInHand(*this, CardId::MIRACLE, false, hasBark ? 4 : 2);
             break;
 
         case Potion::COLORLESS_POTION:
-            addToBot( Actions::DiscoveryAction(CardType::STATUS, hasBark ? 2 : 1) ); // status card type is being used to indicate colorless
+            Actions::DiscoveryAction(*this, CardType::STATUS, hasBark ? 2 : 1); // status card type is being used to indicate colorless
             break;
 
         case Potion::CULTIST_POTION:
-            addToBot(Actions::BuffPlayer<PS::RITUAL>(hasBark ? 2 : 1));
+            Actions::BuffPlayer<PS::RITUAL>(*this, hasBark ? 2 : 1);
             break;
 
         case Potion::CUNNING_POTION:
-            addToBot(Actions::MakeTempCardInHand(CardId::SHIV, true, hasBark ? 6 : 3));
+            Actions::MakeTempCardInHand(*this, CardId::SHIV, true, hasBark ? 6 : 3);
             break;
 
         case Potion::DEXTERITY_POTION:
-            addToBot(Actions::BuffPlayer<PS::DEXTERITY>(hasBark ? 4 : 2));
+            Actions::BuffPlayer<PS::DEXTERITY>(*this, hasBark ? 4 : 2);
             break;
 
         case Potion::DISTILLED_CHAOS: {
             const auto cardsToPlay = hasBark ? 6 : 3;
             for (int i = 0; i < cardsToPlay; ++i) {
-                addToBot( Actions::PlayTopCard(monsters.getRandomMonsterIdx(cardRandomRng), false) );
+                Actions::PlayTopCard(*this, monsters.getRandomMonsterIdx(cardRandomRng), false);
             }
             break;
         }
 
         case Potion::DUPLICATION_POTION:
-            addToBot(Actions::BuffPlayer<PS::DUPLICATION>(hasBark ? 2 : 1));
+            Actions::BuffPlayer<PS::DUPLICATION>(*this, hasBark ? 2 : 1);
             break;
 
         case Potion::ELIXIR_POTION:
-            addToBot( Actions::ExhaustMany(10) );
+            Actions::ExhaustMany(*this, 10);
             break;
 
         case Potion::ENERGY_POTION:
-            addToBot(Actions::GainEnergy(hasBark ? 4 : 2));
+            Actions::GainEnergy(*this, hasBark ? 4 : 2);
             break;
 
         case Potion::ENTROPIC_BREW: {
@@ -3577,34 +3473,34 @@ void BattleContext::drinkPotion(int idx, int target) {
         }
 
         case Potion::ESSENCE_OF_DARKNESS:
-            addToBot( Actions::EssenceOfDarkness(hasBark ? 2 : 1) );
+            Actions::EssenceOfDarkness(*this, hasBark ? 2 : 1);
             break;
 
         case Potion::ESSENCE_OF_STEEL:
-            addToBot( Actions::BuffPlayer<PS::PLATED_ARMOR>(hasBark ? 8 : 4) );
+            Actions::BuffPlayer<PS::PLATED_ARMOR>(*this, hasBark ? 8 : 4);
             break;
 
         case Potion::EXPLOSIVE_POTION: {
             const auto damage = hasBark ? 20 : 10;
-            addToBot( Actions::DamageAllEnemy(damage) ); // todo does not having player be owner here matter?
+            Actions::DamageAllEnemy(*this, damage); // todo does not having player be owner here matter?
             break;
         }
 
         case Potion::FEAR_POTION:
-            addToBot( Actions::DebuffEnemy<MS::VULNERABLE>(target, hasBark ? 6 : 3, false) );
+            Actions::DebuffEnemy<MS::VULNERABLE>(*this, target, hasBark ? 6 : 3, false);
             break;
 
         case Potion::FIRE_POTION:
-            addToBot( Actions::DamageEnemy(target, hasBark ? 40 : 20) );
+            Actions::DamageEnemy(*this, target, hasBark ? 40 : 20);
             break;
 
         case Potion::FLEX_POTION:
-            addToBot( Actions::BuffPlayer<PS::STRENGTH>(hasBark ? 10 : 5) );
-            addToBot( Actions::DebuffPlayer<PS::LOSE_STRENGTH>(hasBark ? 10 : 5) );
+            Actions::BuffPlayer<PS::STRENGTH>(*this, hasBark ? 10 : 5);
+            Actions::DebuffPlayer<PS::LOSE_STRENGTH>(*this, hasBark ? 10 : 5);
             break;
 
         case Potion::FOCUS_POTION:
-            addToBot(Actions::BuffPlayer<PS::FOCUS>(hasBark ? 4 : 2));
+            Actions::BuffPlayer<PS::FOCUS>(*this, hasBark ? 4 : 2);
             break;
 
         case Potion::FRUIT_JUICE:
@@ -3612,44 +3508,44 @@ void BattleContext::drinkPotion(int idx, int target) {
             break;
 
         case Potion::GAMBLERS_BREW:
-            addToBot( Actions::GambleAction() );
+            Actions::GambleAction(*this);
             break;
 
         case Potion::GHOST_IN_A_JAR:
-            addToBot(Actions::BuffPlayer<PS::INTANGIBLE>(hasBark ? 2 : 1));
+            Actions::BuffPlayer<PS::INTANGIBLE>(*this, hasBark ? 2 : 1);
             break;
 
         case Potion::HEART_OF_IRON:
-            addToBot(Actions::BuffPlayer<PS::METALLICIZE>(hasBark ? 12 : 6));
+            Actions::BuffPlayer<PS::METALLICIZE>(*this, hasBark ? 12 : 6);
             break;
 
         case Potion::LIQUID_BRONZE:
-            addToBot(Actions::BuffPlayer<PS::THORNS>(hasBark ? 6 : 3));
+            Actions::BuffPlayer<PS::THORNS>(*this, hasBark ? 6 : 3);
             break;
 
         case Potion::LIQUID_MEMORIES:
-            addToBot( Actions::BetterDiscardPileToHandAction(hasBark ? 2 : 1, CardSelectTask::LIQUID_MEMORIES_POTION) );
+            Actions::BetterDiscardPileToHandAction(*this, hasBark ? 2 : 1, CardSelectTask::LIQUID_MEMORIES_POTION);
             break;
 
         case Potion::POISON_POTION:
-            addToBot( Actions::DebuffEnemy<MS::POISON>(target, hasBark ? 12 : 6) );
+            Actions::DebuffEnemy<MS::POISON>(*this, target, hasBark ? 12 : 6);
             break;
 
         case Potion::POTION_OF_CAPACITY:
-            addToBot( Actions::IncreaseOrbSlots(hasBark ? 4 : 2) );
+            Actions::IncreaseOrbSlots(*this, hasBark ? 4 : 2);
             break;
 
         case Potion::POWER_POTION:
             haveUsedDiscoveryAction = true;
-            addToBot( Actions::DiscoveryAction(CardType::POWER, hasBark ? 2 : 1) );
+            Actions::DiscoveryAction(*this, CardType::POWER, hasBark ? 2 : 1);
             break;
 
         case Potion::REGEN_POTION:
-            addToBot(Actions::BuffPlayer<PS::REGEN>(hasBark ? 10 : 5));
+            Actions::BuffPlayer<PS::REGEN>(*this, hasBark ? 10 : 5);
             break;
 
         case Potion::SKILL_POTION:
-            addToBot(Actions::DiscoveryAction(CardType::SKILL, hasBark ? 2 : 1));
+            Actions::DiscoveryAction(*this, CardType::SKILL, hasBark ? 2 : 1);
             break;
 
         case Potion::SMOKE_BOMB:
@@ -3658,29 +3554,29 @@ void BattleContext::drinkPotion(int idx, int target) {
             break;
 
         case Potion::SNECKO_OIL:
-            addToBot(Actions::DrawCards(hasBark ? 10 : 5));
-            addToBot(Actions::RandomizeHandCost());
+            Actions::DrawCards(*this, hasBark ? 10 : 5);
+            Actions::RandomizeHandCost(*this);
             break;
 
         case Potion::SPEED_POTION:
-            addToBot(Actions::BuffPlayer<PS::DEXTERITY>(hasBark ? 10 : 5));
-            addToBot(Actions::DebuffPlayer<PS::LOSE_DEXTERITY>(hasBark ? 10 : 5));
+            Actions::BuffPlayer<PS::DEXTERITY>(*this, hasBark ? 10 : 5);
+            Actions::DebuffPlayer<PS::LOSE_DEXTERITY>(*this, hasBark ? 10 : 5);
             break;
 
         case Potion::STANCE_POTION:
-            addToBot(Actions::SetState(InputState::CHOOSE_STANCE_ACTION));
+            Actions::SetState(*this, InputState::CHOOSE_STANCE_ACTION);
             break;
 
         case Potion::STRENGTH_POTION:
-            addToBot(Actions::BuffPlayer<PS::STRENGTH>(hasBark ? 4 : 2));
+            Actions::BuffPlayer<PS::STRENGTH>(*this, hasBark ? 4 : 2);
             break;
 
         case Potion::SWIFT_POTION:
-            addToBot(Actions::DrawCards(hasBark ? 6 : 3));
+            Actions::DrawCards(*this, hasBark ? 6 : 3);
             break;
 
         case Potion::WEAK_POTION:
-            addToBot(Actions::DebuffEnemy<MS::WEAK>(target, hasBark ? 6 : 3, false));
+            Actions::DebuffEnemy<MS::WEAK>(*this, target, hasBark ? 6 : 3, false);
             break;
 
         case Potion::INVALID:
@@ -3704,96 +3600,47 @@ void BattleContext::noteEnemyIntentAccess() {
 }
 
 void BattleContext::drawCards(int count) {
-    if (count <= 0 ||
-        player.hasStatus<PS::NO_DRAW>() ||
-         cards.drawPile.size() + cards.discardPile.size() == 0 ||
-         cards.cardsInHand == 10 ) {
-        return;
-    }
-
-    int amountToDraw = std::min(10-cards.cardsInHand, count);
-
-    if (cards.drawPile.size() < amountToDraw) {
-        const auto temp = amountToDraw-static_cast<int>(cards.drawPile.size());
-        addToTop( Actions::DrawCards(temp) );
-        onShuffle();
-        addToTop( Actions::EmptyDeckShuffle() );
-
-        if (!cards.drawPile.empty()) {
-            drawCards(static_cast<int>(cards.drawPile.size())); // the game adds this to top
+    if (count <= 0 || player.hasStatus<PS::NO_DRAW>()) return;
+    while (count-- > 0 && cards.cardsInHand < CardManager::MAX_HAND_SIZE && outcome == Outcome::UNDECIDED) {
+        if (cards.drawPile.empty()) {
+            if (cards.discardPile.empty()) break;
+            onShuffle();
+            Actions::EmptyDeckShuffle(*this);
         }
-        return;
+        if (cards.drawPile.empty()) break;
+        ++cardsDrawn;
+        cards.draw(*this, 1);
     }
-
-    cardsDrawn += amountToDraw; // statistic for monte carlo search
-    cards.draw(*this, amountToDraw);
 }
 
 void BattleContext::discardAtEndOfTurn() {
-    int retainCount = 0;
-    for (int i = 0; i < cards.cardsInHand; ++i) {
-        auto c = cards.hand[i];
-        if (c.hasSelfRetain() || c.retain) {
-            cards.limbo[retainCount++] = c;
-        }
+    std::vector<CardInstance> original(cards.hand.begin(), cards.hand.begin() + cards.cardsInHand);
+    for (auto c : original) {
+        if (!c.isEthereal()) continue;
+        cards.removeFromHandById(c.uniqueId);
+        triggerAndMoveToExhaustPile(c);
     }
-    if (retainCount > 0) {
-        addToTop(Actions::RestoreRetainedCards(retainCount));
-
-        int placeIdx = 0;
-        for (int i = 0; i < cards.cardsInHand; ++i) {
-            auto c = cards.hand[i];
-            if (c.hasSelfRetain() || c.retain) {
-                continue;
-            } else {
-                cards.hand[placeIdx++] = cards.hand[i];
-            }
-        }
-        cards.cardsInHand -= retainCount;
-    }
-
-    if (!player.hasRelic<R::RUNIC_PYRAMID>() && !player.hasStatus<PS::EQUILIBRIUM>()) {
-        addToTop(Actions::DiscardAtEndOfTurnHelper());
-    }
-
-    for (int i = 0; i < cards.cardsInHand; ++i) {
-        const auto &c = cards.hand[i];
-        if (c.isEthereal()) {
-            addToTop(Actions::ExhaustSpecificCardInHand(i, c.uniqueId)); // c.triggerOnEndOfPlayerTurn
-        }
-    }
-
-}
-
-void BattleContext::discardAtEndOfTurnHelper() {
-    if (outcome != Outcome::UNDECIDED) {
-        return;
-    }
-
-    int temp = cards.cardsInHand;
-    for (int i = temp-1; i >= 0; --i) {
-        cards.notifyRemoveFromHand(cards.hand[i]);
-        cards.moveToDiscardPile(cards.hand[i]);
+    if (player.hasRelic<R::RUNIC_PYRAMID>() || player.hasStatus<PS::EQUILIBRIUM>()) return;
+    original.assign(cards.hand.begin(), cards.hand.begin() + cards.cardsInHand);
+    for (auto c : original) {
+        if (c.hasSelfRetain() || c.retain) continue;
+        cards.removeFromHandById(c.uniqueId);
+        cards.moveToDiscardPile(c);
         ++player.cardsDiscardedThisTurn;
     }
-    cards.cardsInHand = 0;
+    for (int i = 0; i < cards.cardsInHand; ++i) cards.hand[i].retain = false;
 }
 
-void BattleContext::playTopCardInDrawPile(int monsterTargetIdx, bool exhausts) {
-    if (cards.drawPile.empty()) {
-        if (!cards.discardPile.empty()) {
-            addToTop( Actions::PlayTopCard(monsterTargetIdx, exhausts) );
-            addToTop( Actions::EmptyDeckShuffle() );
-        }
-        return;
-    }
 
+void BattleContext::playTopCardInDrawPile(int monsterTargetIdx, bool exhausts) {
+    if (cards.drawPile.empty() && !cards.discardPile.empty()) Actions::EmptyDeckShuffle(*this);
+    if (cards.drawPile.empty()) return;
     noteDrawPileOrderAccess();
-    CardQueueItem item(cards.popFromDrawPile(), monsterTargetIdx, player.energy);
+    CardPlay item{cards.popFromDrawPile(), monsterTargetIdx, player.energy};
     item.exhaustOnUse = exhausts;
     item.autoplay = true;
-    item.freeToPlay = true; // todo remove the autoplay boolean? added this instead
-    addToTopCard(item);
+    item.freeToPlay = true;
+    beginCard(item);
 }
 
 void BattleContext::moveToHandHelper(CardInstance c) {
@@ -3815,7 +3662,7 @@ void BattleContext::exhaustSpecificCardInHand(int idx, std::int16_t uniqueId) {
         foundIdx = idx;
     } else {
         for (int i = 0; i < cards.cardsInHand; ++i) {
-            if (cards.hand[idx].uniqueId == uniqueId) {
+            if (cards.hand[i].uniqueId == uniqueId) {
                foundIdx = i;
                break;
             }
@@ -3827,23 +3674,11 @@ void BattleContext::exhaustSpecificCardInHand(int idx, std::int16_t uniqueId) {
         return;
     }
 
-    cards.notifyRemoveFromHand(cards.hand[foundIdx]);
-    triggerAndMoveToExhaustPile(cards.hand[foundIdx]);
-    --cards.cardsInHand;
-
-    for (int i = foundIdx; i < cards.cardsInHand; ++i) {
-        cards.hand[i] = cards.hand[i+1];
-    } // todo fixed the cached variables in cardmanager
+    const auto card = cards.hand[foundIdx];
+    cards.removeFromHandAtIdx(foundIdx);
+    triggerAndMoveToExhaustPile(card);
 }
 
-void BattleContext::restoreRetainedCards(int count) {
-    for (int i = 0; i < count; ++i) {
-        auto &c = cards.limbo[i];
-        // check that c retained or self retained?
-        c.retain = false;
-        cards.hand[cards.cardsInHand++] = c;
-    }
-}
 
 void BattleContext::exhaustTopCardInHand() {
     if (cards.cardsInHand <= 0) {
@@ -3883,27 +3718,27 @@ void BattleContext::triggerOnEndOfTurnForPlayingCards() {
 //        for (int i = 0; i <= hand.size(); ++i) {
 //            switch (hand[i].id) {
 //                case CardId::DECAY:
-//                    addToTop(Actions::DamagePlayer(2));
+//                    Actions::DamagePlayer(*this, 2);
 //                    foundCurse = true;
 //                    break;
 //
 //                case CardId::DOUBT:
-//                    addToTop( Actions::DebuffPlayer<PS::WEAK>(1) );
+//                    Actions::DebuffPlayer<PS::WEAK>(*this, 1);
 //                    foundCurse = true;
 //                    break;
 //
 //                case CardId::SHAME:
-//                    addToTop( Actions::DebuffPlayer<PS::FRAIL>(1) );
+//                    Actions::DebuffPlayer<PS::FRAIL>(*this, 1);
 //                    foundCurse = true;
 //                    break;
 //
 //                case CardId::REGRET:
-//                    addToTop( Actions::PlayerLoseHp(hand.size(), true) );
+//                    Actions::PlayerLoseHp(*this, hand.size(), true);
 //                    foundCurse = true;
 //                    break;
 //
 //                case CardId::BURN:
-//                    addToTop( Actions::DamagePlayer(hand[i].upgraded ? 4 : 2) );
+//                    Actions::DamagePlayer(*this, hand[i].upgraded ? 4 : 2);
 //                    foundCurse = true;
 //                    break;
 //
@@ -3927,12 +3762,12 @@ void BattleContext::triggerOnOtherCardPlayed(const CardInstance &usedCard) {
         --painCount;
     }
     for (int i = 0; i < painCount; ++i) {
-        addToTop(Actions::PlayerLoseHp(1));
+        Actions::PlayerLoseHp(*this, 1);
     }
 
     const auto thousandCuts = player.getStatus<PS::THOUSAND_CUTS>();
     if (thousandCuts) {
-        addToBot(Actions::DamageAllEnemy(thousandCuts));
+        Actions::DamageAllEnemy(*this, thousandCuts);
     }
 }
 
@@ -4030,25 +3865,14 @@ int BattleContext::calculateCardBlock(int baseBlock) const {
 }
 
 void BattleContext::queuePurgeCard(const CardInstance &c, int target) {
-    CardQueueItem item;
+    CardPlay item;
     item.card = c;
     item.purgeOnUse = true;
     item.target = target;
-    item.energyOnUse = curCardQueueItem.energyOnUse;
+    item.energyOnUse = currentCard.energyOnUse;
     item.ignoreEnergyTotal = true;
     item.autoplay = true;
-    addPurgeCardToCardQueue(item);
-}
-
-void BattleContext::addPurgeCardToCardQueue(const CardQueueItem &item) {
-    if (cardQueue.size > 0) {
-        auto temp = cardQueue.front();
-        cardQueue.front() = item;
-        cardQueue.pushFront(temp);
-    } else {
-        cardQueue.pushFront(item);
-    }
-
+    beginCard(item);
 }
 
 void BattleContext::noOpRollMove() {
@@ -4059,23 +3883,23 @@ void BattleContext::onManualDiscard(const CardInstance &c) {
     if (c.getId() == CardId::TACTICIAN) {
         player.gainEnergy(c.isUpgraded() ? 2 : 1);
     } else if (c.getId() == CardId::REFLEX) {
-        addToBot( Actions::DrawCards(c.isUpgraded() ? 3 : 2) );
+        Actions::DrawCards(*this, c.isUpgraded() ? 3 : 2);
     }
 }
 
 void BattleContext::onShuffle() {
     if (player.hasRelic<R::THE_ABACUS>()) {
-        addToBot( Actions::GainBlock(6) );
+        Actions::GainBlock(*this, 6);
     }
 
     if (player.hasRelic<R::MELANGE>()) {
-//        addToBot(Actions::SetState(InputState::SCRY, 3) ); // TODO SCRY Action
+//        Actions::SetState(*this, InputState::SCRY, 3); // TODO SCRY Action
     }
 
     if (player.hasRelic<R::SUNDIAL>()) {
         if (player.sundialCounter == 2) {
             player.sundialCounter = 0;
-            addToBot( Actions::GainEnergy(2) );
+            Actions::GainEnergy(*this, 2);
         } else {
             ++player.sundialCounter;
         }
@@ -4088,24 +3912,24 @@ void BattleContext::triggerAndMoveToExhaustPile(CardInstance c) {
     // (the card).triggerOnExhaust
 
     if (player.hasRelic<R::CHARONS_ASHES>()) {
-        addToTop(Actions::DamageAllEnemy(3));
+        Actions::DamageAllEnemy(*this, 3);
     }
 
     if (player.hasRelic<R::DEAD_BRANCH>()){
         CardId id = getTrulyRandomCardInCombat(cardRandomRng, player.cc);
-        addToBot(Actions::MakeTempCardInHand(id));
+        Actions::MakeTempCardInHand(*this, id);
     }
 
     if (player.hasStatus<PS::DARK_EMBRACE>()) {
-        addToBot(Actions::DrawCards(player.getStatus<PS::DARK_EMBRACE>()));
+        Actions::DrawCards(*this, player.getStatus<PS::DARK_EMBRACE>());
     }
 
     if (player.hasStatus<PS::FEEL_NO_PAIN>()) {
-        addToBot(Actions::GainBlock(player.getStatus<PS::FEEL_NO_PAIN>()));
+        Actions::GainBlock(*this, player.getStatus<PS::FEEL_NO_PAIN>());
     }
 
     if (c.getId() == CardId::NECRONOMICURSE) {
-        addToBot(Actions::MakeTempCardInHand(CardId::NECRONOMICURSE));
+        Actions::MakeTempCardInHand(*this, CardId::NECRONOMICURSE);
     }
 
     if (c.getId() == CardId::SENTINEL) {
@@ -4132,7 +3956,9 @@ void BattleContext::mummifiedHandOnUsePower() {
 
     for (int i = matchingIdxList.size()-1; i >= 0; --i) {
         const auto uniqueId = cards.hand[matchingIdxList[i]].getUniqueId();
-        if (cardQueue.containsCardWithId(uniqueId)) {
+        if (std::any_of(resolution.begin(), resolution.end(), [uniqueId](const auto& frame) {
+            return frame.isCard() && frame.card.card.uniqueId == uniqueId;
+        })) {
             matchingIdxList.remove(i);
         }
     }
@@ -4163,7 +3989,6 @@ void BattleContext::openSimpleCardSelectScreen(CardSelectTask task, int count) {
     cardSelectInfo.canPickAnyNumber = false;
     cardSelectInfo.canPickZero = false;
 }
-
 
 
 void BattleContext::chooseArmamentsCard(int handIdx) {
@@ -4336,7 +4161,7 @@ void BattleContext::chooseSeekCard(int drawIdx) {
     cards.removeFromDrawPileAtIdx(drawIdx);
     moveToHandHelper(card);
     if (--cardSelectInfo.data0 > 0 && !cards.drawPile.empty()) {
-        addToBot(Actions::SetState(InputState::CARD_SELECT));
+        Actions::SetState(*this, InputState::CARD_SELECT);
     }
 }
 
@@ -4366,16 +4191,16 @@ void BattleContext::chooseScryCards(const fixed_list<int, 10> &idxs) {
 }
 
 void BattleContext::chooseWish(int choice) {
-    const bool upgraded = curCardQueueItem.card.isUpgraded();
+    const bool upgraded = currentCard.card.isUpgraded();
     switch (choice) {
         case 0:
-            addToBot(Actions::BuffPlayer<PS::PLATED_ARMOR>(upgraded ? 4 : 3));
+            Actions::BuffPlayer<PS::PLATED_ARMOR>(*this, upgraded ? 4 : 3);
             break;
         case 1:
             player.gainGold(*this, 25);
             break;
         case 2:
-            addToBot(Actions::BuffPlayer<PS::STRENGTH>(upgraded ? 10 : 8));
+            Actions::BuffPlayer<PS::STRENGTH>(*this, upgraded ? 10 : 8);
             break;
         default:
             assert(false);
@@ -4430,13 +4255,13 @@ void BattleContext::chooseGambleCards(const fixed_list<int, 10> &idxs) {
     std::sort(listCopy.begin(), listCopy.end(), [](auto a, auto b) { return b < a; });
 
     // assume idxs is sorted in descending order
-    addToTop( Actions::DrawCards(listCopy.size()) );
     for (const auto handIdx : listCopy) {
         auto c = cards.hand[handIdx];
         cards.removeFromHandAtIdx(handIdx);
         cards.moveToDiscardPile(c);
         onManualDiscard(c);
     }
+    Actions::DrawCards(*this, listCopy.size());
 }
 
 
@@ -4471,8 +4296,7 @@ void BattleContext::chooseGambleCards(const fixed_list<int, 10> &idxs) {
         printPotions(os, bc);
         printRngCounters(os, bc);
 
-        os << "\tactionQueueSize: " << bc.actionQueue.size
-            << ", cardQueueSize: " << bc.cardQueue.size
+        os << "	resolutionDepth: " << bc.resolution.size()
             << ", turn: " << bc.turn
             << ", ascension " << bc.ascension
             << ", loopCount: " << bc.loopCount

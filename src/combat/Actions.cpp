@@ -5,40 +5,16 @@
 #include "combat/Actions.h"
 #include "combat/BattleContext.h"
 #include "game/Game.h"
-#include <stdexcept>
-#include <type_traits>
-#include <utility>
 
 namespace sts {
 
-namespace {
-// Status effects keep their existing template implementations; the queue stores only the enum value.
-template <class Status, class F, std::size_t... I>
-void visit_status(Status status, F&& f, std::index_sequence<I...>) {
-    using Call = void (*)(F&);
-    static constexpr Call calls[] = {
-        +[](F& call) { call(std::integral_constant<Status, static_cast<Status>(I)>{}); }...
-    };
-    const auto index = static_cast<std::size_t>(status);
-    if (index >= sizeof...(I)) throw std::invalid_argument{"invalid queued status"};
-    calls[index](f);
-}
-} // namespace
-
-
-Action Actions::SetState(InputState state) {
-    return {queued::SetState{state}};
-}
-
-void queued::SetState::execute(BattleContext& bc) const {
+void Actions::SetState(BattleContext& bc, InputState state) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.setState(state);
 }
 
-Action Actions::AttackEnemy(int idx, int damage) {
-    return {queued::AttackEnemy{idx, damage}};
-}
-
-void queued::AttackEnemy::execute(BattleContext& bc) const {
+void Actions::AttackEnemy(BattleContext& bc, int idx, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.monsters.arr[idx].isDeadOrEscaped()) {
         return;
     }
@@ -50,17 +26,14 @@ void queued::AttackEnemy::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::AttackAllEnemy(int baseDamage) {
-    return {queued::AttackAllEnemy{baseDamage}};
-}
-
-void queued::AttackAllEnemy::execute(BattleContext& bc) const {
+void Actions::AttackAllEnemy(BattleContext& bc, int baseDamage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // assume bc.curCard is the card being used
 
     int damageMatrix[5];
     for (int i = 0; i < bc.monsters.monsterCount; ++i) {
         if (!bc.monsters.arr[i].isDeadOrEscaped()) {
-            damageMatrix[i] = bc.calculateCardDamage(bc.curCardQueueItem.card, i, baseDamage);
+            damageMatrix[i] = bc.calculateCardDamage(bc.currentCard.card, i, baseDamage);
         }
     }
 
@@ -76,11 +49,8 @@ void queued::AttackAllEnemy::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::AttackAllEnemy(DamageMatrix damageMatrix) {
-    return {queued::AttackAllEnemyMatrix{damageMatrix}};
-}
-
-void queued::AttackAllEnemyMatrix::execute(BattleContext& bc) const {
+void Actions::AttackAllEnemy(BattleContext& bc, DamageMatrix damageMatrix) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // assume bc.curCard is the card being used
 
     for (int i = 0; i < bc.monsters.monsterCount; ++i) {
@@ -95,11 +65,8 @@ void queued::AttackAllEnemyMatrix::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::DamageEnemy(int idx, int damage) {
-    return {queued::DamageEnemy{idx, damage}};
-}
-
-void queued::DamageEnemy::execute(BattleContext& bc) const {
+void Actions::DamageEnemy(BattleContext& bc, int idx, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.monsters.arr[idx].isDeadOrEscaped()) {
         return;
     }
@@ -108,40 +75,26 @@ void queued::DamageEnemy::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::DamageAllEnemy(int damage) {
-    return {queued::DamageAllEnemy{damage}};
-}
-
-void queued::DamageAllEnemy::execute(BattleContext& bc) const {
+void Actions::DamageAllEnemy(BattleContext& bc, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int idx = 0; idx < bc.monsters.monsterCount; idx++) {
         if (!bc.monsters.arr[idx].isDeadOrEscaped()) {
-            bc.monsters.arr[idx].damage(bc, damage); // possible should addToBot here todo
+            bc.monsters.arr[idx].damage(bc, damage);
         }
     }
     bc.checkCombat();
 }
 
-Action Actions::AttackPlayer(int idx, int damage) {
-    return {queued::AttackPlayer{idx, damage}, false};
-}
-
-void queued::AttackPlayer::execute(BattleContext& bc) const {
+void Actions::AttackPlayer(BattleContext& bc, int idx, int damage) {
     bc.player.attacked(bc, idx, damage);
 }
 
-Action Actions::DamagePlayer(int damage, bool selfDamage) {
-    return {queued::DamagePlayer{damage, selfDamage}, false};
-}
-
-void queued::DamagePlayer::execute(BattleContext& bc) const {
+void Actions::DamagePlayer(BattleContext& bc, int damage, bool selfDamage) {
     bc.player.damage(bc, damage, selfDamage);
 }
 
-Action Actions::VampireAttack(int damage) {
-    return {queued::VampireAttack{damage}};
-}
-
-void queued::VampireAttack::execute(BattleContext& bc) const {
+void Actions::VampireAttack(BattleContext& bc, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const auto mIdx = 0;
     auto &m = bc.monsters.arr[mIdx]; // only used by shelled parasite so idx is 0
     bc.player.attacked(bc, mIdx, damage);
@@ -150,44 +103,27 @@ void queued::VampireAttack::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::PlayerLoseHp(int hp, bool selfDamage) {
-    return {queued::PlayerLoseHp{hp, selfDamage}, false};
-}
-
-void queued::PlayerLoseHp::execute(BattleContext& bc) const {
+void Actions::PlayerLoseHp(BattleContext& bc, int hp, bool selfDamage) {
     bc.player.loseHp(bc, hp, selfDamage);
 }
 
-Action Actions::HealPlayer(int amount) {
-    return {queued::HealPlayer{amount}, false};
-}
-
-void queued::HealPlayer::execute(BattleContext& bc) const {
+void Actions::HealPlayer(BattleContext& bc, int amount) {
     bc.player.heal(amount);
 }
 
-Action Actions::MonsterGainBlock(int idx, int amount) {
-    return {queued::MonsterGainBlock{idx, amount}};
-}
-
-void queued::MonsterGainBlock::execute(BattleContext& bc) const {
+void Actions::MonsterGainBlock(BattleContext& bc, int idx, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.monsters.arr[idx].block += amount;
 }
 
-Action Actions::RollMove(int monsterIdx) {
-    return {queued::RollMove{monsterIdx}};
-}
-
-void queued::RollMove::execute(BattleContext& bc) const {
+void Actions::RollMove(BattleContext& bc, int monsterIdx) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     Monster &m = bc.monsters.arr[monsterIdx];
     m.rollMove(bc);
 }
 
-Action Actions::ReactiveRollMove() {
-    return {queued::ReactiveRollMove{}};
-}
-
-void queued::ReactiveRollMove::execute(BattleContext& bc) const {
+void Actions::ReactiveRollMove(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // writhing mass is always monster 0
     Monster &m = bc.monsters.arr[0];
 
@@ -197,19 +133,13 @@ void queued::ReactiveRollMove::execute(BattleContext& bc) const {
     m.setStatus<MS::REACTIVE>(0);
 }
 
-Action Actions::NoOpRollMove() {
-    return {queued::NoOpRollMove{}};
-}
-
-void queued::NoOpRollMove::execute(BattleContext& bc) const {
+void Actions::NoOpRollMove(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.noOpRollMove();
 }
 
-Action Actions::ChangeStance(Stance stance) {
-    return {queued::ChangeStance{stance}};
-}
-
-void queued::ChangeStance::execute(BattleContext& bc) const {
+void Actions::ChangeStance(BattleContext& bc, Stance stance) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const auto previousStance = bc.player.stance;
     if (previousStance == stance) {
         return;
@@ -221,48 +151,35 @@ void queued::ChangeStance::execute(BattleContext& bc) const {
         bc.player.gainEnergy(2);
     }
     if (previousStance != Stance::NEUTRAL && bc.player.nirvanaBlock > 0) {
-        bc.addToBot(Actions::GainBlock(bc.player.nirvanaBlock));
+        Actions::GainBlock(bc, bc.player.nirvanaBlock);
     }
     if (bc.player.mentalFortressBlock > 0) {
-        bc.addToBot(Actions::GainBlock(bc.player.mentalFortressBlock));
+        Actions::GainBlock(bc, bc.player.mentalFortressBlock);
     }
     bc.player.stance = stance;
     if (stance == Stance::WRATH && bc.player.rushdownDraw > 0) {
-        bc.addToBot(Actions::DrawCards(bc.player.rushdownDraw));
+        Actions::DrawCards(bc, bc.player.rushdownDraw);
     }
     if (stance == Stance::DIVINITY) {
         bc.player.gainEnergy(3);
     }
 }
 
-Action Actions::GainEnergy(int amount) {
-    return {queued::GainEnergy{amount}};
-}
-
-void queued::GainEnergy::execute(BattleContext& bc) const {
+void Actions::GainEnergy(BattleContext& bc, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.gainEnergy(amount);
 }
 
-Action Actions::GainBlock(int amount) {
-    return {queued::GainBlock{amount}, false};
-}
-
-void queued::GainBlock::execute(BattleContext& bc) const {
+void Actions::GainBlock(BattleContext& bc, int amount) {
     bc.player.gainBlock(bc, amount);
 }
-Action Actions::DrawCards(int amount) {
-    return {queued::DrawCards{amount}};
-}
-
-void queued::DrawCards::execute(BattleContext& bc) const {
+void Actions::DrawCards(BattleContext& bc, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.drawCards(amount);
 }
 
-Action Actions::EmptyDeckShuffle() {
-    return {queued::EmptyDeckShuffle{}};
-}
-
-void queued::EmptyDeckShuffle::execute(BattleContext& bc) const {
+void Actions::EmptyDeckShuffle(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     java::Collections::shuffle(
             bc.cards.discardPile.begin(),
             bc.cards.discardPile.end(),
@@ -272,11 +189,8 @@ void queued::EmptyDeckShuffle::execute(BattleContext& bc) const {
     bc.cards.moveDiscardPileIntoToDrawPile();
 }
 
-Action Actions::ShuffleDrawPile() {
-    return {queued::ShuffleDrawPile{}};
-}
-
-void queued::ShuffleDrawPile::execute(BattleContext& bc) const {
+void Actions::ShuffleDrawPile(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     java::Collections::shuffle(
             bc.cards.drawPile.begin(),
             bc.cards.drawPile.end(),
@@ -284,11 +198,8 @@ void queued::ShuffleDrawPile::execute(BattleContext& bc) const {
     );
 }
 
-Action Actions::ShuffleTempCardIntoDrawPile(CardId id, int count) {
-    return {queued::ShuffleTempCardIntoDrawPile{id, count}};
-}
-
-void queued::ShuffleTempCardIntoDrawPile::execute(BattleContext& bc) const {
+void Actions::ShuffleTempCardIntoDrawPile(BattleContext& bc, CardId id, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     CardInstance c(id);
     for (int i = 0; i < count; ++i) {
         const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
@@ -296,27 +207,21 @@ void queued::ShuffleTempCardIntoDrawPile::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::PlayTopCard(int monsterTargetIdx, bool exhausts) {
-    return {queued::PlayTopCard{monsterTargetIdx, exhausts}};
-}
-
-void queued::PlayTopCard::execute(BattleContext& bc) const {
+void Actions::PlayTopCard(BattleContext& bc, int monsterTargetIdx, bool exhausts) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.playTopCardInDrawPile(monsterTargetIdx, exhausts);
 }
 
 
 // todo fix the arguments are used wrongly all over ? what did this mean
 // todo check for master reality
-Action Actions::MakeTempCardInHand(CardId card, bool upgraded, int amount) {
+void Actions::MakeTempCardInHand(BattleContext& bc, CardId card, bool upgraded, int amount) {
     CardInstance c(card, upgraded);
-    return Actions::MakeTempCardInHand(c, amount);
+    return Actions::MakeTempCardInHand(bc, c, amount);
 }
 
-Action Actions::MakeTempCardInHand(CardInstance card, int amount) {
-    return {queued::MakeTempCardInHand{card, amount}};
-}
-
-void queued::MakeTempCardInHand::execute(BattleContext& bc) const {
+void Actions::MakeTempCardInHand(BattleContext& bc, CardInstance card, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < amount; ++i) {
         CardInstance c(card);
         c.uniqueId = bc.cards.nextUniqueCardId++;
@@ -325,11 +230,8 @@ void queued::MakeTempCardInHand::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::MakeTempCardInDrawPile(const CardInstance &c, int amount, bool shuffleInto) {
-    return {queued::MakeTempCardInDrawPile{c, amount, shuffleInto}};
-}
-
-void queued::MakeTempCardInDrawPile::execute(BattleContext& bc) const {
+void Actions::MakeTempCardInDrawPile(BattleContext& bc, const CardInstance &c, int amount, bool shuffleInto) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < amount; ++i) {
         if (shuffleInto) {
             const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
@@ -339,21 +241,15 @@ void queued::MakeTempCardInDrawPile::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::MakeTempCardInDiscard(const CardInstance &c, int amount) {
-    return {queued::MakeTempCardInDiscard{c, amount}};
+void Actions::MakeTempCardInDiscard(BattleContext& bc, const CardInstance &c, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
+           for (int i = 0; i < amount; ++i) {
+               bc.cards.createTempCardInDiscard(c);
+           }
 }
 
-void queued::MakeTempCardInDiscard::execute(BattleContext& bc) const {
-    for (int i = 0; i < amount; ++i) {
-        bc.cards.createTempCardInDiscard(c);
-    }
-}
-
-Action Actions::MakeTempCardsInHand(std::vector<CardInstance> cards) {
-    return {queued::MakeTempCardsInHand{std::move(cards)}};
-}
-
-void queued::MakeTempCardsInHand::execute(BattleContext& bc) const {
+void Actions::MakeTempCardsInHand(BattleContext& bc, std::vector<CardInstance> cards) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (auto c : cards) {
         c.uniqueId = bc.cards.nextUniqueCardId++;
         bc.cards.notifyAddCardToCombat(c);
@@ -362,113 +258,41 @@ void queued::MakeTempCardsInHand::execute(BattleContext& bc) const {
 }
 
 
-Action Actions::DiscardNoTriggerCard() {
-    return {queued::DiscardNoTriggerCard{}};
-}
-
-void queued::DiscardNoTriggerCard::execute(BattleContext& bc) const {
-    const auto &c = bc.curCardQueueItem.card;
+void Actions::DiscardNoTriggerCard(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
+    const auto &c = bc.currentCard.card;
     bc.cards.notifyRemoveFromHand(c);
     bc.cards.moveToDiscardPile(c);
 }
 
-Action Actions::ClearCardQueue() {
-    return {queued::ClearCardQueue{}};
-}
 
-void queued::ClearCardQueue::execute(BattleContext& bc) const {
-    bc.cardQueue.clear();
-}
-
-Action Actions::DiscardAtEndOfTurn() {
-    return {queued::DiscardAtEndOfTurn{}};
-}
-
-void queued::DiscardAtEndOfTurn::execute(BattleContext& bc) const {
-    bc.discardAtEndOfTurn();
-}
-
-Action Actions::DiscardAtEndOfTurnHelper() {
-    return {queued::DiscardAtEndOfTurnHelper{}};
-}
-
-void queued::DiscardAtEndOfTurnHelper::execute(BattleContext& bc) const {
-    bc.discardAtEndOfTurnHelper();
-}
-
-Action Actions::RestoreRetainedCards(int count) {
-    return {queued::RestoreRetainedCards{count}};
-}
-
-void queued::RestoreRetainedCards::execute(BattleContext& bc) const {
-    bc.restoreRetainedCards(count);
-}
-
-Action Actions::UnnamedEndOfTurnAction() {
-    return {queued::UnnamedEndOfTurnAction{}};
-}
-
-void queued::UnnamedEndOfTurnAction::execute(BattleContext& bc) const {
-    bc.turnHasEnded = true;
-    if (!bc.skipMonsterTurn) {
-        bc.addToBot(Actions::MonsterStartTurnAction());
-        bc.monsterTurnIdx = 0; // monstergroup preincrements this
-    }
-}
-
-Action Actions::MonsterStartTurnAction() {
-    return {queued::MonsterStartTurnAction{}};
-}
-
-void queued::MonsterStartTurnAction::execute(BattleContext& bc) const {
-    bc.monsters.applyPreTurnLogic(bc);
-}
-
-Action Actions::TriggerEndOfTurnOrbsAction() {
-    return {queued::TriggerEndOfTurnOrbsAction{}};
-}
-
-void queued::TriggerEndOfTurnOrbsAction::execute(BattleContext& bc) const {
+void Actions::TriggerEndOfTurnOrbsAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.triggerEndOfTurnOrbs(bc);
 }
 
-Action Actions::ChannelOrb(Orb orb, int orbData) {
-    return {queued::ChannelOrb{orb, orbData}};
-}
-
-void queued::ChannelOrb::execute(BattleContext& bc) const {
+void Actions::ChannelOrb(BattleContext& bc, Orb orb, int orbData) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.channelOrb(bc, orb, orbData);
 }
 
-Action Actions::EvokeFrontOrb() {
-    return {queued::EvokeFrontOrb{}};
-}
-
-void queued::EvokeFrontOrb::execute(BattleContext& bc) const {
+void Actions::EvokeFrontOrb(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.evokeFrontOrb(bc);
 }
 
-Action Actions::ExhaustTopCardInHand() {
-    return {queued::ExhaustTopCardInHand{}};
-}
-
-void queued::ExhaustTopCardInHand::execute(BattleContext& bc) const {
+void Actions::ExhaustTopCardInHand(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.exhaustTopCardInHand();
 }
 
-Action Actions::ExhaustSpecificCardInHand(int idx, std::int16_t uniqueId) {
-    return {queued::ExhaustSpecificCardInHand{idx, uniqueId}};
-}
-
-void queued::ExhaustSpecificCardInHand::execute(BattleContext& bc) const {
+void Actions::ExhaustSpecificCardInHand(BattleContext& bc, int idx, std::int16_t uniqueId) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.exhaustSpecificCardInHand(idx, uniqueId);
 }
 
-Action Actions::DamageRandomEnemy(int damage) {
-    return {queued::DamageRandomEnemy{damage}};
-}
-
-void queued::DamageRandomEnemy::execute(BattleContext& bc) const {
+void Actions::DamageRandomEnemy(BattleContext& bc, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const int idx = bc.monsters.getRandomMonsterIdx(bc.cardRandomRng, true);
     if (idx == -1) {
         return;
@@ -477,11 +301,8 @@ void queued::DamageRandomEnemy::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::ExhaustRandomCardInHand(int count) {
-    return {queued::ExhaustRandomCardInHand{count}};
-}
-
-void queued::ExhaustRandomCardInHand::execute(BattleContext& bc) const {
+void Actions::ExhaustRandomCardInHand(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < count; ++i) {
         if (bc.cards.cardsInHand <= 0) {
             return;
@@ -493,11 +314,8 @@ void queued::ExhaustRandomCardInHand::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::MadnessAction() {
-    return {queued::MadnessAction{}};
-}
-
-void queued::MadnessAction::execute(BattleContext& bc) const {
+void Actions::MadnessAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
             bool haveNonZeroCost = false;
             bool haveNonZeroTurnCost = false;
             for (int i = 0; i < bc.cards.cardsInHand; ++i) {
@@ -548,11 +366,8 @@ void queued::MadnessAction::execute(BattleContext& bc) const {
     //#pragma clang diagnostic pop
 }
 
-Action Actions::RandomizeHandCost() {
-    return {queued::RandomizeHandCost{}};
-}
-
-void queued::RandomizeHandCost::execute(BattleContext& bc) const {
+void Actions::RandomizeHandCost(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         auto &c = bc.cards.hand[i];
         if (c.cost >= 0) {
@@ -563,11 +378,8 @@ void queued::RandomizeHandCost::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::GainBlockRandomEnemy(int sourceMonster, int amount) {
-    return {queued::GainBlockRandomEnemy{sourceMonster, amount}};
-}
-
-void queued::GainBlockRandomEnemy::execute(BattleContext& bc) const {
+void Actions::GainBlockRandomEnemy(BattleContext& bc, int sourceMonster, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     int validIdxs[5];
     int validCount = 0;
 
@@ -588,11 +400,8 @@ void queued::GainBlockRandomEnemy::execute(BattleContext& bc) const {
     bc.monsters.arr[targetIdx].addBlock(amount);
 }
 
-Action Actions::SummonGremlins() {
-    return {queued::SummonGremlins{}};
-}
-
-void queued::SummonGremlins::execute(BattleContext& bc) const {
+void Actions::SummonGremlins(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
             int openIdxCount = 0;
             int newGremlinIdxs[2];
             if (bc.monsters.arr[1].isDying()) {
@@ -629,11 +438,8 @@ void queued::SummonGremlins::execute(BattleContext& bc) const {
             gremlin1.rollMove(bc);
 }
 
-Action Actions::SpawnTorchHeads() {
-    return {queued::SpawnTorchHeads{}};
-}
-
-void queued::SpawnTorchHeads::execute(BattleContext& bc) const {
+void Actions::SpawnTorchHeads(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
             const auto spawnCount = 3-bc.monsters.monstersAlive;
     #ifdef sts_asserts
             assert(spawnCount > 0);
@@ -660,11 +466,8 @@ void queued::SpawnTorchHeads::execute(BattleContext& bc) const {
             }
 }
 
-Action Actions::SpireShieldDebuff() {
-    return {queued::SpireShieldDebuff{}};
-}
-
-void queued::SpireShieldDebuff::execute(BattleContext& bc) const {
+void Actions::SpireShieldDebuff(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.aiRng.randomBoolean()) {
         bc.player.debuff<PS::FOCUS>(-1);
     } else {
@@ -673,19 +476,8 @@ void queued::SpireShieldDebuff::execute(BattleContext& bc) const {
 }
 
 
-Action Actions::OnAfterCardUsed() {
-    return {queued::OnAfterCardUsed{}, false};
-}
-
-void queued::OnAfterCardUsed::execute(BattleContext& bc) const {
-    bc.onAfterUseCard();
-}
-
-Action Actions::PutRandomCardsInDrawPile(CardType type, int count) {
-    return {queued::PutRandomCardsInDrawPile{type, count}};
-}
-
-void queued::PutRandomCardsInDrawPile::execute(BattleContext& bc) const {
+void Actions::PutRandomCardsInDrawPile(BattleContext& bc, CardType type, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     CardId ids[5];
     for (int i = 0; i < count; ++i) {
         ids[i] = getTrulyRandomCardInCombat(bc.cardRandomRng, bc.player.cc, type);
@@ -701,44 +493,32 @@ void queued::PutRandomCardsInDrawPile::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::DiscoveryAction(CardType type, int amount) {
-    return {queued::DiscoveryAction{type, amount}};
-}
-
-void queued::DiscoveryAction::execute(BattleContext& bc) const {
+void Actions::DiscoveryAction(BattleContext& bc, CardType type, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.haveUsedDiscoveryAction = true;
     bc.openDiscoveryScreen(sts::generateDiscoveryCards(bc.cardRandomRng, bc.player.cc, type), amount);
 }
 
-Action Actions::InfernalBladeAction() {
-    return {queued::InfernalBladeAction{}};
-}
-
-void queued::InfernalBladeAction::execute(BattleContext& bc) const {
+void Actions::InfernalBladeAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const auto cid = getTrulyRandomCardInCombat(bc.cardRandomRng, bc.player.cc, CardType::ATTACK);
     CardInstance c(cid);
     c.setCostForTurn(0);
-    bc.addToTop( Actions::MakeTempCardInHand(c) );
+    Actions::MakeTempCardInHand(bc, c);
 }
 
-Action Actions::JackOfAllTradesAction(bool upgraded) {
-    return {queued::JackOfAllTradesAction{upgraded}};
-}
-
-void queued::JackOfAllTradesAction::execute(BattleContext& bc) const {
+void Actions::JackOfAllTradesAction(BattleContext& bc, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const auto c1 = sts::getTrulyRandomColorlessCardInCombat(bc.cardRandomRng);
-    bc.addToTop( Actions::MakeTempCardInHand(c1) );
+    Actions::MakeTempCardInHand(bc, c1);
     if (upgraded) {
         auto c2 = sts::getTrulyRandomColorlessCardInCombat(bc.cardRandomRng);
-        bc.addToTop( Actions::MakeTempCardInHand(c2) );
+        Actions::MakeTempCardInHand(bc, c2);
     }
 }
 
-Action Actions::TransmutationAction(bool upgraded, int energy, bool useEnergy) {
-    return {queued::TransmutationAction{upgraded, energy, useEnergy}};
-}
-
-void queued::TransmutationAction::execute(BattleContext& bc) const {
+void Actions::TransmutationAction(BattleContext& bc, bool upgraded, int energy, bool useEnergy) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
      const auto effectAmount = energy + (bc.player.hasRelic<R::CHEMICAL_X>() ? 2 : 0);
 
      if (effectAmount == 0) {
@@ -752,18 +532,15 @@ void queued::TransmutationAction::execute(BattleContext& bc) const {
         c.setCostForTurn(0);
         cards.push_back(c);
     }
-    bc.addToBot( Actions::MakeTempCardsInHand(cards) );
+    Actions::MakeTempCardsInHand(bc, cards);
 
     if (useEnergy) {
         bc.player.useEnergy(bc.player.energy);
     }
 }
 
-Action Actions::ViolenceAction(int count) {
-    return {queued::ViolenceAction{count}};
-}
-
-void queued::ViolenceAction::execute(BattleContext& bc) const {
+void Actions::ViolenceAction(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     fixed_list<int,CardManager::MAX_GROUP_SIZE> attackIdxList;
     for (int i = 0; i < bc.cards.drawPile.size(); ++i) {
         const auto &c = bc.cards.drawPile[i];
@@ -810,11 +587,8 @@ void queued::ViolenceAction::execute(BattleContext& bc) const {
 }
 
 // todo the amount should be the copies put into the hand 2 if have sacred bark and liquid memories
-Action Actions::BetterDiscardPileToHandAction(int amount, CardSelectTask task) {
-    return {queued::BetterDiscardPileToHandAction{amount, task}};
-}
-
-void queued::BetterDiscardPileToHandAction::execute(BattleContext& bc) const {
+void Actions::BetterDiscardPileToHandAction(BattleContext& bc, int amount, CardSelectTask task) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.discardPile.empty()) {
         return;
     }
@@ -826,11 +600,8 @@ void queued::BetterDiscardPileToHandAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::ArmamentsAction() {
-    return {queued::ArmamentsAction{}};
-}
-
-void queued::ArmamentsAction::execute(BattleContext& bc) const {
+void Actions::ArmamentsAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     int canUpgradeCount = 0;
     int lastUpgradeIdx = 0;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
@@ -851,11 +622,8 @@ void queued::ArmamentsAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::DualWieldAction(int copyCount) {
-    return {queued::DualWieldAction{copyCount}};
-}
-
-void queued::DualWieldAction::execute(BattleContext& bc) const {
+void Actions::DualWieldAction(BattleContext& bc, int copyCount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     //        fixed_list<CardInstance, 10> validCards;
     //        fixed_list<CardInstance, 10> invalidCards;
     //
@@ -904,11 +672,8 @@ void queued::DualWieldAction::execute(BattleContext& bc) const {
             }
 }
 
-Action Actions::ExhumeAction() {
-    return {queued::ExhumeAction{}};
-}
-
-void queued::ExhumeAction::execute(BattleContext& bc) const {
+void Actions::ExhumeAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.exhaustPile.empty() || bc.cards.cardsInHand == 10) {
         return;
     }
@@ -934,11 +699,8 @@ void queued::ExhumeAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::ForethoughtAction(bool upgraded) {
-    return {queued::ForethoughtAction{upgraded}};
-}
-
-void queued::ForethoughtAction::execute(BattleContext& bc) const {
+void Actions::ForethoughtAction(BattleContext& bc, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
             if (bc.cards.cardsInHand == 0) {
                 return;
             }
@@ -961,11 +723,8 @@ void queued::ForethoughtAction::execute(BattleContext& bc) const {
     //        }
 }
 
-Action Actions::HeadbuttAction() {
-    return {queued::HeadbuttAction{}};
-}
-
-void queued::HeadbuttAction::execute(BattleContext& bc) const {
+void Actions::HeadbuttAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.discardPile.empty()) {
         return;
 
@@ -976,11 +735,8 @@ void queued::HeadbuttAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::ChooseExhaustOne() {
-    return {queued::ChooseExhaustOne{}};
-}
-
-void queued::ChooseExhaustOne::execute(BattleContext& bc) const {
+void Actions::ChooseExhaustOne(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.cardsInHand == 0) {
         return;
 
@@ -993,11 +749,8 @@ void queued::ChooseExhaustOne::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::DrawToHandAction(CardSelectTask task, CardType cardType) {
-    return {queued::DrawToHandAction{task, cardType}};
-}
-
-void queued::DrawToHandAction::execute(BattleContext& bc) const {
+void Actions::DrawToHandAction(BattleContext& bc, CardSelectTask task, CardType cardType) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     int count = 0;
     int idx = 0;
 
@@ -1027,11 +780,8 @@ void queued::DrawToHandAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::WarcryAction() {
-    return {queued::WarcryAction{}};
-}
-
-void queued::WarcryAction::execute(BattleContext& bc) const {
+void Actions::WarcryAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // todo if the handSize equals or less than the cardsToChoose just choose them here
     if (bc.cards.cardsInHand == 0) {
         return;
@@ -1047,23 +797,9 @@ void queued::WarcryAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::TimeEaterPlayCardQueueItem(const CardQueueItem &x) {
-    return {queued::TimeEaterPlayCardQueueItem{x}, false};
-}
 
-void queued::TimeEaterPlayCardQueueItem::execute(BattleContext& bc) const {
-    auto item = x;
-    item.exhaustOnUse |= bc.curCardQueueItem.card.doesExhaust();
-    item.triggerOnUse = false;
-    bc.curCardQueueItem = item;
-    bc.onAfterUseCard();
-}
-
-Action Actions::UpgradeAllCardsInHand() {
-    return {queued::UpgradeAllCardsInHand{}};
-}
-
-void queued::UpgradeAllCardsInHand::execute(BattleContext& bc) const {
+void Actions::UpgradeAllCardsInHand(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         if (bc.cards.hand[i].canUpgrade()) {  // curses and statuses can't be upgraded
             bc.cards.hand[i].upgrade();
@@ -1071,22 +807,16 @@ void queued::UpgradeAllCardsInHand::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::EssenceOfDarkness(int darkOrbsPerSlot) {
-    return {queued::EssenceOfDarkness{darkOrbsPerSlot}};
-}
-
-void queued::EssenceOfDarkness::execute(BattleContext& bc) const {
+void Actions::EssenceOfDarkness(BattleContext& bc, int darkOrbsPerSlot) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const auto count = bc.player.orbSlots * darkOrbsPerSlot;
     for (int i = 0; i < count; ++i) {
         bc.player.channelOrb(bc, Orb::DARK);
     }
 }
 
-Action Actions::MakeRandomCardInHand(CardType type, int count, bool zeroCost) {
-    return {queued::MakeRandomCardInHand{type, count, zeroCost}};
-}
-
-void queued::MakeRandomCardInHand::execute(BattleContext& bc) const {
+void Actions::MakeRandomCardInHand(BattleContext& bc, CardType type, int count, bool zeroCost) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < count; ++i) {
         CardInstance card(getTrulyRandomCardInCombat(bc.cardRandomRng, bc.player.cc, type));
         if (zeroCost) {
@@ -1096,11 +826,8 @@ void queued::MakeRandomCardInHand::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::MakeRandomCommonCardInHand(int count) {
-    return {queued::MakeRandomCommonCardInHand{count}};
-}
-
-void queued::MakeRandomCommonCardInHand::execute(BattleContext& bc) const {
+void Actions::MakeRandomCommonCardInHand(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < count; ++i) {
         CardId id = CardId::INVALID;
         do {
@@ -1110,11 +837,8 @@ void queued::MakeRandomCommonCardInHand::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::DiscardOne() {
-    return {queued::DiscardOne{}};
-}
-
-void queued::DiscardOne::execute(BattleContext& bc) const {
+void Actions::DiscardOne(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.cardsInHand == 0) {
         return;
     }
@@ -1126,11 +850,8 @@ void queued::DiscardOne::execute(BattleContext& bc) const {
     bc.inputState = InputState::CARD_SELECT;
 }
 
-Action Actions::RecycleAction() {
-    return {queued::RecycleAction{}};
-}
-
-void queued::RecycleAction::execute(BattleContext& bc) const {
+void Actions::RecycleAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.cardsInHand == 0) {
         return;
     }
@@ -1141,11 +862,8 @@ void queued::RecycleAction::execute(BattleContext& bc) const {
     bc.openSimpleCardSelectScreen(CardSelectTask::RECYCLE, 1);
 }
 
-Action Actions::ScrapeAction(int drawCount) {
-    return {queued::ScrapeAction{drawCount}};
-}
-
-void queued::ScrapeAction::execute(BattleContext& bc) const {
+void Actions::ScrapeAction(BattleContext& bc, int drawCount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.drawCards(drawCount);
     for (int i = bc.cards.cardsInHand - 1; i >= 0; --i) {
         const auto card = bc.cards.hand[i];
@@ -1157,11 +875,8 @@ void queued::ScrapeAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::RebootAction(int drawCount) {
-    return {queued::RebootAction{drawCount}};
-}
-
-void queued::RebootAction::execute(BattleContext& bc) const {
+void Actions::RebootAction(BattleContext& bc, int drawCount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = bc.cards.cardsInHand - 1; i >= 0; --i) {
         const auto card = bc.cards.hand[i];
         bc.cards.removeFromHandAtIdx(i);
@@ -1170,11 +885,8 @@ void queued::RebootAction::execute(BattleContext& bc) const {
     bc.drawCards(drawCount);
 }
 
-Action Actions::SeekAction(int count) {
-    return {queued::SeekAction{count}};
-}
-
-void queued::SeekAction::execute(BattleContext& bc) const {
+void Actions::SeekAction(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.drawPile.empty() || count <= 0) {
         return;
     }
@@ -1186,11 +898,8 @@ void queued::SeekAction::execute(BattleContext& bc) const {
     bc.cardSelectInfo.data0 = count;
 }
 
-Action Actions::AllForOneAction() {
-    return {queued::AllForOneAction{}};
-}
-
-void queued::AllForOneAction::execute(BattleContext& bc) const {
+void Actions::AllForOneAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // All for One returns every currently-zero-cost discard card to hand;
     // it does not play those cards. Preserve discard-pile iteration order,
     // while removing in reverse to keep indexes stable.
@@ -1210,19 +919,13 @@ void queued::AllForOneAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::IncreaseOrbSlots(int count) {
-    return {queued::IncreaseOrbSlots{count}};
-}
-
-void queued::IncreaseOrbSlots::execute(BattleContext& bc) const {
+void Actions::IncreaseOrbSlots(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.increaseOrbSlots(count);
 }
 
-Action Actions::SuicideAction(int monsterIdx, bool triggerRelics) {
-    return {queued::SuicideAction{monsterIdx, triggerRelics}};
-}
-
-void queued::SuicideAction::execute(BattleContext& bc) const {
+void Actions::SuicideAction(BattleContext& bc, int monsterIdx, bool triggerRelics) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &m = bc.monsters.arr[monsterIdx];
     if (triggerRelics) {
         if (m.isAlive()) {
@@ -1233,11 +936,8 @@ void queued::SuicideAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::PoisonLoseHpAction(int monsterIdx) {
-    return {queued::PoisonLoseHpAction{monsterIdx}};
-}
-
-void queued::PoisonLoseHpAction::execute(BattleContext& bc) const {
+void Actions::PoisonLoseHpAction(BattleContext& bc, int monsterIdx) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &monster = bc.monsters.arr[monsterIdx];
     if (monster.isDeadOrEscaped() || !monster.hasStatus<MonsterStatus::POISON>()) {
         return;
@@ -1250,19 +950,13 @@ void queued::PoisonLoseHpAction::execute(BattleContext& bc) const {
     monster.decrementStatus<MonsterStatus::POISON>();
 }
 
-Action Actions::RemovePlayerDebuffs() {
-    return {queued::RemovePlayerDebuffs{}};
-}
-
-void queued::RemovePlayerDebuffs::execute(BattleContext& bc) const {
+void Actions::RemovePlayerDebuffs(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.removeDebuffs();
 }
 
-Action Actions::UpgradeRandomCardAction() {
-    return {queued::UpgradeRandomCardAction{}};
-}
-
-void queued::UpgradeRandomCardAction::execute(BattleContext& bc) const {
+void Actions::UpgradeRandomCardAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     fixed_list<int,10> upgradeableHandIdxs;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         if (bc.cards.hand[i].canUpgrade()) {
@@ -1284,41 +978,29 @@ void queued::UpgradeRandomCardAction::execute(BattleContext& bc) const {
     bc.cards.hand[upgradeIdx].upgrade();
 }
 
-Action Actions::CodexAction() {
-    return {queued::CodexAction{}};
-}
-
-void queued::CodexAction::execute(BattleContext& bc) const {
+void Actions::CodexAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.inputState = InputState::CARD_SELECT;
     bc.cardSelectInfo.cardSelectTask = CardSelectTask::CODEX;
     bc.cardSelectInfo.codexCards() =
             generateDiscoveryCards(bc.cardRandomRng, CharacterClass::IRONCLAD, CardType::INVALID);
 }
 
-Action Actions::ExhaustMany(int limit) {
-    return {queued::ExhaustMany{limit}};
-}
-
-void queued::ExhaustMany::execute(BattleContext& bc) const {
+void Actions::ExhaustMany(BattleContext& bc, int limit) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.inputState = InputState::CARD_SELECT;
     bc.cardSelectInfo.cardSelectTask = CardSelectTask::EXHAUST_MANY;
     bc.cardSelectInfo.pickCount = limit;
 }
 
-Action Actions::GambleAction() {
-    return {queued::GambleAction{}};
-}
-
-void queued::GambleAction::execute(BattleContext& bc) const {
+void Actions::GambleAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.inputState = InputState::CARD_SELECT;
     bc.cardSelectInfo.cardSelectTask = CardSelectTask::GAMBLE;
 }
 
-Action Actions::ToolboxAction() {
-    return {queued::ToolboxAction{}};
-}
-
-void queued::ToolboxAction::execute(BattleContext& bc) const {
+void Actions::ToolboxAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.inputState = InputState::CARD_SELECT;
     bc.cardSelectInfo.cardSelectTask = CardSelectTask::DISCOVERY;
     bc.cardSelectInfo.discovery_CopyCount() = 1;
@@ -1326,20 +1008,14 @@ void queued::ToolboxAction::execute(BattleContext& bc) const {
             generateDiscoveryCards(bc.cardRandomRng, bc.player.cc, CardType::STATUS); // status is mapped to colorless
 }
 
-Action Actions::DualityAction() {
-    return {queued::DualityAction{}};
-}
-
-void queued::DualityAction::execute(BattleContext& bc) const {
+void Actions::DualityAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.buff<PS::DEXTERITY>(1);
     bc.player.debuff<PS::LOSE_DEXTERITY>(1);
 }
 
-Action Actions::ApotheosisAction() {
-    return {queued::ApotheosisAction{}};
-}
-
-void queued::ApotheosisAction::execute(BattleContext& bc) const {
+void Actions::ApotheosisAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         auto &c = bc.cards.hand[i];
         if (c.canUpgrade()) {
@@ -1366,26 +1042,20 @@ void queued::ApotheosisAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::DropkickAction(int targetIdx) {
-    return {queued::DropkickAction{targetIdx}};
-}
-
-void queued::DropkickAction::execute(BattleContext& bc) const {
+void Actions::DropkickAction(BattleContext& bc, int targetIdx) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.monsters.arr[targetIdx].isTargetable() && bc.monsters.arr[targetIdx].hasStatus<MS::VULNERABLE>()) {
-        bc.addToTop(Actions::DrawCards(1));
-        bc.addToTop(Actions::GainEnergy(1));
+        Actions::DrawCards(bc, 1);
+        Actions::GainEnergy(bc, 1);
     }
 
-    const auto &c = bc.curCardQueueItem.card;
+    const auto &c = bc.currentCard.card;
     const int damage = bc.calculateCardDamage(c, targetIdx, c.isUpgraded() ? 8 : 5);
-    bc.addToTop(Actions::AttackEnemy(targetIdx, damage));
+    Actions::AttackEnemy(bc, targetIdx, damage);
 }
 
-Action Actions::EnlightenmentAction(bool upgraded) {
-    return {queued::EnlightenmentAction{upgraded}};
-}
-
-void queued::EnlightenmentAction::execute(BattleContext& bc) const {
+void Actions::EnlightenmentAction(BattleContext& bc, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         auto &c = bc.cards.hand[i];
         if (c.costForTurn > 1) {
@@ -1398,19 +1068,13 @@ void queued::EnlightenmentAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::EntrenchAction() {
-    return {queued::EntrenchAction{}};
-}
-
-void queued::EntrenchAction::execute(BattleContext& bc) const {
+void Actions::EntrenchAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.gainBlock(bc, bc.player.block);
 }
 
-Action Actions::FeedAction(int idx, int damage, bool upgraded) {
-    return {queued::FeedAction{idx, damage, upgraded}};
-}
-
-void queued::FeedAction::execute(BattleContext& bc) const {
+void Actions::FeedAction(BattleContext& bc, int idx, int damage, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &m = bc.monsters.arr[idx];
     if (m.isDeadOrEscaped()) {
         return;
@@ -1429,25 +1093,19 @@ void queued::FeedAction::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::FiendFireAction(int targetIdx, int calculatedDamage) {
-    return {queued::FiendFireAction{targetIdx, calculatedDamage}};
-}
-
-void queued::FiendFireAction::execute(BattleContext& bc) const {
-    for (int i = 0; i < bc.cards.cardsInHand; ++i) {
-        bc.addToTop(Actions::AttackEnemy(targetIdx, calculatedDamage));
+void Actions::FiendFireAction(BattleContext& bc, int targetIdx, int calculatedDamage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
+    const std::vector<CardInstance> original(bc.cards.hand.begin(), bc.cards.hand.begin() + bc.cards.cardsInHand);
+    for (auto card : original) {
+        if (bc.outcome != Outcome::UNDECIDED) break;
+        bc.cards.removeFromHandById(card.uniqueId);
+        bc.triggerAndMoveToExhaustPile(card);
     }
-
-    for (int i = 0; i < bc.cards.cardsInHand; ++i) {
-        bc.addToTop( Actions::ExhaustRandomCardInHand(1) );
-    }
+    for (std::size_t i = 0; i < original.size(); ++i) Actions::AttackEnemy(bc, targetIdx, calculatedDamage);
 }
 
-Action Actions::HandOfGreedAction(int idx, int damage, bool upgraded) {
-    return {queued::HandOfGreedAction{idx, damage, upgraded}};
-}
-
-void queued::HandOfGreedAction::execute(BattleContext& bc) const {
+void Actions::HandOfGreedAction(BattleContext& bc, int idx, int damage, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &m = bc.monsters.arr[idx];
     if (m.isDeadOrEscaped()) {
         return;
@@ -1466,19 +1124,13 @@ void queued::HandOfGreedAction::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::LimitBreakAction() {
-    return {queued::LimitBreakAction{}};
-}
-
-void queued::LimitBreakAction::execute(BattleContext& bc) const {
+void Actions::LimitBreakAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.player.buff<PS::STRENGTH>(bc.player.getStatus<PS::STRENGTH>());
 }
 
-Action Actions::ReaperAction(int baseDamage) {
-    return {queued::ReaperAction{baseDamage}};
-}
-
-void queued::ReaperAction::execute(BattleContext& bc) const {
+void Actions::ReaperAction(BattleContext& bc, int baseDamage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     int healAmount = 0;
     for (int i = 0; i < bc.monsters.monsterCount; ++i) {
         auto &m = bc.monsters.arr[i];
@@ -1486,12 +1138,12 @@ void queued::ReaperAction::execute(BattleContext& bc) const {
             continue;
         }
         int preDamageHp = m.curHp;
-        m.attacked(bc, bc.calculateCardDamage(bc.curCardQueueItem.card, i, baseDamage));
+        m.attacked(bc, bc.calculateCardDamage(bc.currentCard.card, i, baseDamage));
         healAmount += preDamageHp-m.curHp;
     }
 
     if (healAmount > 0) {
-        bc.addToBot( Actions::HealPlayer(healAmount) );
+        Actions::HealPlayer(bc, healAmount);
     }
 
     //if (AbstractDungeon.getCurrRoom().monsters.areMonstersBasicallyDead()) {
@@ -1499,11 +1151,8 @@ void queued::ReaperAction::execute(BattleContext& bc) const {
     //            }
 }
 
-Action Actions::RitualDaggerAction(int idx, int damage) {
-    return {queued::RitualDaggerAction{idx, damage}};
-}
-
-void queued::RitualDaggerAction::execute(BattleContext& bc) const {
+void Actions::RitualDaggerAction(BattleContext& bc, int idx, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &m = bc.monsters.arr[idx];
     if (m.isDeadOrEscaped()) {
         return;
@@ -1514,10 +1163,10 @@ void queued::RitualDaggerAction::execute(BattleContext& bc) const {
                                && !m.isAlive()
                                && !(m.hasStatus<MS::REGROW>() && bc.monsters.monstersAlive > 0);
     if (shouldUpgrade) {
-        auto &c = bc.curCardQueueItem.card;
+        auto &c = bc.currentCard.card;
         const auto upgradeAmt = c.isUpgraded() ? 5 : 3;
 
-        if (bc.curCardQueueItem.purgeOnUse) {
+        if (bc.currentCard.purgeOnUse) {
             bc.cards.findAndUpgradeSpecialData(c.uniqueId, upgradeAmt);
         }
         c.specialData += upgradeAmt;
@@ -1526,48 +1175,30 @@ void queued::RitualDaggerAction::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::SecondWindAction(int blockPerCard) {
-    return {queued::SecondWindAction{blockPerCard}};
-}
-
-void queued::SecondWindAction::execute(BattleContext& bc) const {
-    int cardIdxsToExhaust[10];
-    int toExhaustCount = 0;
-
-    for (int i = 0; i < bc.cards.cardsInHand; ++i) {
-        const auto &c = bc.cards.hand[i];
-        if (c.getType() != CardType::ATTACK) {
-            cardIdxsToExhaust[toExhaustCount++] = i;
-            bc.addToTop( Actions::GainBlock(blockPerCard) );
-        }
-    }
-
-    for (int i = 0; i < toExhaustCount; ++i) {
-        const auto handIdx = cardIdxsToExhaust[i];
-        const auto &c = bc.cards.hand[handIdx];
-
-        bc.addToTop( Actions::ExhaustSpecificCardInHand(handIdx, c.uniqueId) );
+void Actions::SecondWindAction(BattleContext& bc, int blockPerCard) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
+    const std::vector<CardInstance> original(bc.cards.hand.begin(), bc.cards.hand.begin() + bc.cards.cardsInHand);
+    for (auto card : original) {
+        if (bc.outcome != Outcome::UNDECIDED) break;
+        if (card.getType() == CardType::ATTACK) continue;
+        bc.cards.removeFromHandById(card.uniqueId);
+        bc.triggerAndMoveToExhaustPile(card);
+        Actions::GainBlock(bc, blockPerCard);
     }
 }
 
-Action Actions::SeverSoulExhaustAction() {
-    return {queued::SeverSoulExhaustAction{}};
-}
-
-void queued::SeverSoulExhaustAction::execute(BattleContext& bc) const {
+void Actions::SeverSoulExhaustAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = bc.cards.cardsInHand-1; i >= 0; --i) {
         const auto &c = bc.cards.hand[i];
         if (c.getType() != CardType::ATTACK) {
-            bc.addToBot( Actions::ExhaustSpecificCardInHand(i, c.getUniqueId()) );
+            Actions::ExhaustSpecificCardInHand(bc, i, c.getUniqueId());
         }
     }
 }
 
-Action Actions::SwordBoomerangAction(int baseDamage) {
-    return {queued::SwordBoomerangAction{baseDamage}};
-}
-
-void queued::SwordBoomerangAction::execute(BattleContext& bc) const {
+void Actions::SwordBoomerangAction(BattleContext& bc, int baseDamage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const static CardInstance swordBoomerang {CardId::SWORD_BOOMERANG};
     const auto idx = bc.monsters.getRandomMonsterIdx(bc.cardRandomRng, true);
     if (idx == -1) {
@@ -1575,25 +1206,19 @@ void queued::SwordBoomerangAction::execute(BattleContext& bc) const {
     }
 
     int damage = bc.calculateCardDamage(swordBoomerang, idx, baseDamage);
-    bc.addToTop(Actions::AttackEnemy(idx, damage));
+    Actions::AttackEnemy(bc, idx, damage);
 }
 
-Action Actions::SpotWeaknessAction(int target, int strength) {
-    return {queued::SpotWeaknessAction{target, strength}};
-}
-
-void queued::SpotWeaknessAction::execute(BattleContext& bc) const {
+void Actions::SpotWeaknessAction(BattleContext& bc, int target, int strength) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     bc.noteEnemyIntentAccess();
     if (bc.monsters.arr[target].isAttacking()) {
         bc.player.buff<PS::STRENGTH>(strength);
     }
 }
 
-Action Actions::ScryAction(int count) {
-    return {queued::ScryAction{count}};
-}
-
-void queued::ScryAction::execute(BattleContext& bc) const {
+void Actions::ScryAction(BattleContext& bc, int count) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const int visible = std::min(count, static_cast<int>(bc.cards.drawPile.size()));
     if (visible == 0) return;
     bc.noteDrawPileOrderAccess();
@@ -1602,11 +1227,8 @@ void queued::ScryAction::execute(BattleContext& bc) const {
     bc.inputState = InputState::CARD_SELECT;
 }
 
-Action Actions::BouncingFlaskAction(int poison) {
-    return {queued::BouncingFlaskAction{poison}};
-}
-
-void queued::BouncingFlaskAction::execute(BattleContext& bc) const {
+void Actions::BouncingFlaskAction(BattleContext& bc, int poison) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < 3; ++i) {
         fixed_list<int, 5> targets;
         for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
@@ -1622,11 +1244,8 @@ void queued::BouncingFlaskAction::execute(BattleContext& bc) const {
     }
 }
 
-Action Actions::CalculatedGambleAction() {
-    return {queued::CalculatedGambleAction{}};
-}
-
-void queued::CalculatedGambleAction::execute(BattleContext& bc) const {
+void Actions::CalculatedGambleAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const int count = bc.cards.cardsInHand;
     for (int i = count - 1; i >= 0; --i) {
         const auto card = bc.cards.hand[i];
@@ -1634,29 +1253,23 @@ void queued::CalculatedGambleAction::execute(BattleContext& bc) const {
         bc.cards.moveToDiscardPile(card);
         bc.onManualDiscard(card);
     }
-    bc.addToBot(Actions::DrawCards(count));
+    Actions::DrawCards(bc, count);
 }
 
-Action Actions::EscapePlanAction(int block) {
-    return {queued::EscapePlanAction{block}};
-}
-
-void queued::EscapePlanAction::execute(BattleContext& bc) const {
+void Actions::EscapePlanAction(BattleContext& bc, int block) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (!bc.cards.drawPile.empty()) {
         bc.noteDrawPileOrderAccess();
         const auto &card = bc.cards.drawPile.back();
         if (card.getType() == CardType::ATTACK) {
-            bc.addToBot(Actions::GainBlock(bc.calculateCardBlock(block)));
+            Actions::GainBlock(bc, bc.calculateCardBlock(block));
         }
     }
-    bc.addToBot(Actions::DrawCards(1));
+    Actions::DrawCards(bc, 1);
 }
 
-Action Actions::RandomDiscardAction() {
-    return {queued::RandomDiscardAction{}};
-}
-
-void queued::RandomDiscardAction::execute(BattleContext& bc) const {
+void Actions::RandomDiscardAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.cardsInHand == 0) {
         return;
     }
@@ -1667,22 +1280,16 @@ void queued::RandomDiscardAction::execute(BattleContext& bc) const {
     bc.onManualDiscard(card);
 }
 
-Action Actions::SetupAction() {
-    return {queued::SetupAction{}};
-}
-
-void queued::SetupAction::execute(BattleContext& bc) const {
+void Actions::SetupAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (bc.cards.cardsInHand == 0) {
         return;
     }
     bc.openSimpleCardSelectScreen(CardSelectTask::SETUP, 1);
 }
 
-Action Actions::SunderAction(int target, int damage) {
-    return {queued::SunderAction{target, damage}};
-}
-
-void queued::SunderAction::execute(BattleContext& bc) const {
+void Actions::SunderAction(BattleContext& bc, int target, int damage) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     auto &monster = bc.monsters.arr[target];
     if (monster.isDeadOrEscaped()) {
         return;
@@ -1695,19 +1302,13 @@ void queued::SunderAction::execute(BattleContext& bc) const {
     bc.checkCombat();
 }
 
-Action Actions::ModifyCurrentCardCost(int amount) {
-    return {queued::ModifyCurrentCardCost{amount}};
+void Actions::ModifyCurrentCardCost(BattleContext& bc, int amount) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
+    bc.currentCard.card.updateCost(amount);
 }
 
-void queued::ModifyCurrentCardCost::execute(BattleContext& bc) const {
-    bc.curCardQueueItem.card.updateCost(amount);
-}
-
-Action Actions::StormOfSteelAction(bool upgraded) {
-    return {queued::StormOfSteelAction{upgraded}};
-}
-
-void queued::StormOfSteelAction::execute(BattleContext& bc) const {
+void Actions::StormOfSteelAction(BattleContext& bc, bool upgraded) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     const int discarded = bc.cards.cardsInHand;
     for (int i = bc.cards.cardsInHand - 1; i >= 0; --i) {
         const auto card = bc.cards.hand[i];
@@ -1715,25 +1316,19 @@ void queued::StormOfSteelAction::execute(BattleContext& bc) const {
         bc.cards.moveToDiscardPile(card);
         bc.onManualDiscard(card);
     }
-    bc.addToBot(Actions::MakeTempCardInHand(CardId::SHIV, upgraded, discarded));
+    Actions::MakeTempCardInHand(bc, CardId::SHIV, upgraded, discarded);
 }
 
-Action Actions::BulletTimeAction() {
-    return {queued::BulletTimeAction{}};
-}
-
-void queued::BulletTimeAction::execute(BattleContext& bc) const {
+void Actions::BulletTimeAction(BattleContext& bc) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     for (int i = 0; i < bc.cards.cardsInHand; ++i) {
         bc.cards.hand[i].setCostForTurn(0);
     }
     bc.player.buff<PS::NO_DRAW>(1);
 }
 
-Action Actions::WhirlwindAction(int baseDamage, int energy, bool useEnergy) {
-    return {queued::WhirlwindAction{baseDamage, energy, useEnergy}};
-}
-
-void queued::WhirlwindAction::execute(BattleContext& bc) const {
+void Actions::WhirlwindAction(BattleContext& bc, int baseDamage, int energy, bool useEnergy) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     // assume bc.curCard is the card being used
 
     if (useEnergy) {
@@ -1743,7 +1338,7 @@ void queued::WhirlwindAction::execute(BattleContext& bc) const {
     DamageMatrix damageMatrix {0};
     for (int i = 0; i < bc.monsters.monsterCount; ++i) {
         if (!bc.monsters.arr[i].isDeadOrEscaped()) {
-            const auto calcDamage = bc.calculateCardDamage(bc.curCardQueueItem.card, i, baseDamage);
+            const auto calcDamage = bc.calculateCardDamage(bc.currentCard.card, i, baseDamage);
 
             damageMatrix[i] = static_cast<std::uint16_t>( // fit damage into uint16
                 std::min(
@@ -1756,109 +1351,21 @@ void queued::WhirlwindAction::execute(BattleContext& bc) const {
 
     const auto effectAmount = energy + (bc.player.hasRelic<R::CHEMICAL_X>() ? 2 : 0);
     if (effectAmount > 0) {
-        Actions::AttackAllMonsterRecursive(damageMatrix, effectAmount).execute(bc);
+        Actions::AttackAllMonsterRecursive(bc, damageMatrix, effectAmount);
     }
 }
 
-Action Actions::AttackAllMonsterRecursive(DamageMatrix matrix, int timesRemaining) {
-    return {queued::AttackAllMonsterRecursive{matrix, timesRemaining}};
-}
-
-void queued::AttackAllMonsterRecursive::execute(BattleContext& bc) const {
+void Actions::AttackAllMonsterRecursive(BattleContext& bc, DamageMatrix matrix, int timesRemaining) {
+    if (bc.outcome != Outcome::UNDECIDED) return;
     if (timesRemaining <= 0) {
         return;
     }
 
-    Actions::AttackAllEnemy(matrix).execute(bc);
+    Actions::AttackAllEnemy(bc, matrix);
 
     if (timesRemaining > 1) {
-        bc.addToTop(Actions::AttackAllMonsterRecursive(matrix, timesRemaining-1)); // todo should this be to the top? test with
+        Actions::AttackAllMonsterRecursive(bc, matrix, timesRemaining-1); // todo should this be to the top? test with
     }
-}
-
-Action Actions::Judgment(int target, int threshold) {
-    return {queued::Judgment{target, threshold}};
-}
-
-void queued::Judgment::execute(BattleContext& bc) const {
-    auto& monster = bc.monsters.arr[target];
-    if (!monster.isDeadOrEscaped() && monster.curHp <= threshold) {
-        monster.curHp = 0;
-        monster.die(bc);
-        bc.checkCombat();
-    }
-}
-
-Action Actions::Catalyst(int target, int multiplier) {
-    return {queued::Catalyst{target, multiplier}};
-}
-
-void queued::Catalyst::execute(BattleContext& bc) const {
-    auto& monster = bc.monsters.arr[target];
-    if (!monster.isDeadOrEscaped() && monster.hasStatus<MS::POISON>()) {
-        monster.setStatus<MS::POISON>(monster.getStatus<MS::POISON>() * multiplier);
-    }
-}
-
-void queued::BuffPlayer::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        if (s == PlayerStatus::CORRUPTION && !bc.player.hasStatus<PS::CORRUPTION>()) {
-            bc.cards.onBuffCorruption();
-        }
-        bc.player.buff<s>(amount);
-    }, std::make_index_sequence<std::size(playerStatusStrings)>{});
-}
-
-void queued::DebuffPlayer::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        bc.player.debuff<s>(amount, isSourceMonster);
-    }, std::make_index_sequence<std::size(playerStatusStrings)>{});
-}
-
-void queued::DecrementStatus::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        bc.player.decrementStatus<s>(amount);
-    }, std::make_index_sequence<std::size(playerStatusStrings)>{});
-}
-
-void queued::RemoveStatus::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        bc.player.setHasStatus<s>(false);
-    }, std::make_index_sequence<std::size(playerStatusStrings)>{});
-}
-
-void queued::BuffEnemy::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        // todo check if alive?
-        bc.monsters.arr[idx].buff<s>(amount);
-    }, std::make_index_sequence<std::size(monsterStatusEnumStrings)>{});
-}
-
-void queued::DebuffEnemy::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        bc.debuffEnemy<s>(idx, amount, isSourceMonster);
-    }, std::make_index_sequence<std::size(monsterStatusEnumStrings)>{});
-}
-
-void queued::DebuffAllEnemy::execute(BattleContext& bc) const {
-    visit_status(status, [&](auto tag) {
-        constexpr auto s = decltype(tag)::value;
-        for (int i = bc.monsters.monsterCount-1; i >= 0; --i) {
-            if (bc.monsters.arr[i].isTargetable()) {
-                bc.addToTop(Actions::DebuffEnemy<s>(i, amount, isSourceMonster));
-            }
-        }
-    }, std::make_index_sequence<std::size(monsterStatusEnumStrings)>{});
-}
-
-void Action::execute(BattleContext& state) const {
-    std::visit([&](const auto& effect) { effect.execute(state); }, payload);
 }
 
 } // namespace sts

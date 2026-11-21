@@ -474,22 +474,6 @@ void executeMultiCardSelectActionHelper(BattleContext &bc, search::Action a) {
     }
 }
 
-search::TransitionSnapshot::RngState search::TransitionSnapshot::rngState(const BattleContext& bc) {
-    // Low-level nextInt/nextLong calls need not increment Random::counter.
-    const auto state = [](const Random& rng) {
-        return std::make_tuple(rng.counter, rng.seed0, rng.seed1);
-    };
-    return {state(bc.aiRng), state(bc.cardRandomRng), state(bc.miscRng),
-            state(bc.monsterHpRng), state(bc.potionRng), state(bc.shuffleRng)};
-}
-
-search::TransitionSnapshot::TransitionSnapshot(const BattleContext& bc)
-    : rng_{rngState(bc)}, hidden_{bc.hiddenInformationAccesses} {}
-
-search::TransitionEffects search::TransitionSnapshot::effects(const BattleContext& bc) const {
-    return {rng_ != rngState(bc), hidden_ != bc.hiddenInformationAccesses};
-}
-
 search::TransitionEffects search::Action::execute(BattleContext &bc) const {
 #ifdef sts_asserts
     if (!isValidAction(bc)) {
@@ -500,12 +484,23 @@ search::TransitionEffects search::Action::execute(BattleContext &bc) const {
     }
 #endif
 
-    const TransitionSnapshot before{bc};
+    // Include the underlying state: nextInt/nextLong need not increment Random::counter.
+    const auto rngState = [&bc] {
+        const auto state = [](const Random &rng) {
+            return std::make_tuple(rng.counter, rng.seed0, rng.seed1);
+        };
+        return std::array{state(bc.aiRng), state(bc.cardRandomRng), state(bc.miscRng),
+                          state(bc.monsterHpRng), state(bc.potionRng), state(bc.shuffleRng)};
+    };
+    const auto beforeRng = rngState();
+    const auto beforeHidden = bc.hiddenInformationAccesses;
+
+    bc.inputState = InputState::EXECUTING_ACTIONS;
 
     switch (getActionType()) {
         case ActionType::CARD: {
-            const CardQueueItem item(bc.cards.hand[getSourceIdx()], getTargetIdx(), bc.player.energy);
-            bc.addToBotCard(item);
+            const CardPlay item(bc.cards.hand[getSourceIdx()], getTargetIdx(), bc.player.energy);
+            bc.beginCard(item);
             break;
         }
 
@@ -531,7 +526,7 @@ search::TransitionEffects search::Action::execute(BattleContext &bc) const {
             break;
 
         case ActionType::CHOOSE_STANCE:
-            bc.addToBot(Actions::ChangeStance(static_cast<Stance>(getSelectIdx())));
+            Actions::ChangeStance(bc, static_cast<Stance>(getSelectIdx()));
             break;
 
         case ActionType::CHOOSE_ENEMY:
@@ -542,9 +537,8 @@ search::TransitionEffects search::Action::execute(BattleContext &bc) const {
             break;
     }
 
-    bc.inputState = InputState::EXECUTING_ACTIONS;
     bc.executeActions();
-    return before.effects(bc);
+    return {beforeRng != rngState(), beforeHidden != bc.hiddenInformationAccesses};
 }
 
 template <typename ForwardIt>
