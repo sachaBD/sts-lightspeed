@@ -682,9 +682,7 @@ void Player::applyStartOfTurnRelics(BattleContext &bc) {
     if (hasRelic<R::INSERTER>()) {
         if (++inserterCounter == 2) {
             inserterCounter = 0; // todo
-            bc.addToBot( {[=](BattleContext &bc) {
-                bc.player.increaseOrbSlots(1);
-            }});
+            bc.addToBot(Actions::IncreaseOrbSlots(1));
         }
     }
 

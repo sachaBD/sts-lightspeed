@@ -92,13 +92,12 @@ void allRngStreamsAndLowLevelCalls() {
     for (auto stream : streams) {
         for (bool lowLevel : {false, true}) {
             auto state = fixture(CardId::STRIKE_RED);
-            state.addToBot({[=](BattleContext &bc) {
-                if (lowLevel) (bc.*stream).nextLong();
-                else (bc.*stream).random(0);  // Only one possible result still consumes RNG.
-            }});
-            const auto effects = play(state);
+            const search::TransitionSnapshot before{state};
+            if (lowLevel) (state.*stream).nextLong();
+            else (state.*stream).random(0);  // Only one possible result still consumes RNG.
+            const auto effects = before.effects(state);
             require(effects.consumedRng && !effects.accessedHiddenInformation && effects.isChance(),
-                    "all RNG streams and low-level calls must be detected through queued effects");
+                    "all RNG streams and low-level calls must be detected");
         }
     }
 }
